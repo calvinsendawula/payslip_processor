@@ -48,3 +48,15 @@ logs/
 temp_*.jpg
 *_processed.jpg
 frontend_archive/
+frontend_react/
+
+# Flask specific
+instance/
+.webassets-cache
+
+# Virtual Environment
+venv/
+ENV/
+
+# Uploads folder (temporary files)
+uploads/

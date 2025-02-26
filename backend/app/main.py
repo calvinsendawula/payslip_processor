@@ -26,7 +26,7 @@ app = FastAPI()
 # Configure CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173"],
+    allow_origins=["http://localhost:5173"],  # This is your frontend URL
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -123,30 +123,31 @@ async def process_image_with_ollama(image_path: str, schema: dict) -> dict:
         raise HTTPException(status_code=500, detail=str(e))
 
 async def preprocess_image(image_path: str) -> str:
-    """Enhance image for better text extraction"""
+    """Preprocess the image for better OCR results"""
     try:
-        with Image.open(image_path) as img:
-            # Convert to grayscale
-            img = img.convert('L')
-            
-            # Increase contrast
-            from PIL import ImageEnhance
-            enhancer = ImageEnhance.Contrast(img)
-            img = enhancer.enhance(2.0)  # Increase contrast
-            
-            # Resize if too large (maintain aspect ratio)
-            max_size = 1024
-            if max(img.size) > max_size:
-                ratio = max_size / max(img.size)
-                img = img.resize((int(img.size[0] * ratio), int(img.size[1] * ratio)))
-            
-            # Save preprocessed image
-            preprocessed_path = f"{image_path}_processed.jpg"
-            img.save(preprocessed_path, quality=95)
-            return preprocessed_path
+        # Check if the file is a PDF
+        if image_path.lower().endswith('.pdf'):
+            logger.info("Processing as PDF file...")
+            # Convert PDF to image
+            images = convert_from_bytes(open(image_path, 'rb').read())
+            if not images:
+                raise ValueError("Failed to convert PDF to images")
+                
+            # Save the first page as an image
+            output_path = f"{os.path.splitext(image_path)[0]}_processed.jpg"
+            images[0].save(output_path, 'JPEG')
+            return output_path
+        else:
+            logger.info("Processing as image file...")
+            # Process image file
+            img = Image.open(image_path)
+            output_path = f"{os.path.splitext(image_path)[0]}_processed.jpg"
+            img.save(output_path, 'JPEG')
+            return output_path
     except Exception as e:
-        logger.error(f"Image preprocessing failed: {e}")
-        return image_path  # Return original if preprocessing fails
+        logger.error(f"Image preprocessing failed: {str(e)}")
+        # If preprocessing fails, return the original path
+        return image_path
 
 async def extract_employee_info(image_path: str) -> dict:
     """Extract just employee information"""
