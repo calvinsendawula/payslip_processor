@@ -31,16 +31,16 @@ document.addEventListener('DOMContentLoaded', function() {
     
     payslipDropArea.addEventListener('dragover', (e) => {
         e.preventDefault();
-        payslipDropArea.style.borderColor = '#1976d2';
+        payslipDropArea.style.borderColor = '#257f49';
     });
     
     payslipDropArea.addEventListener('dragleave', () => {
-        payslipDropArea.style.borderColor = '#ccc';
+        payslipDropArea.style.borderColor = '#005f3d';
     });
     
     payslipDropArea.addEventListener('drop', (e) => {
         e.preventDefault();
-        payslipDropArea.style.borderColor = '#ccc';
+        payslipDropArea.style.borderColor = '#005f3d';
         
         if (e.dataTransfer.files.length) {
             payslipFileInput.files = e.dataTransfer.files;
@@ -195,16 +195,16 @@ document.addEventListener('DOMContentLoaded', function() {
     
     propertyDropArea.addEventListener('dragover', (e) => {
         e.preventDefault();
-        propertyDropArea.style.borderColor = '#1976d2';
+        propertyDropArea.style.borderColor = '#257f49';
     });
     
     propertyDropArea.addEventListener('dragleave', () => {
-        propertyDropArea.style.borderColor = '#ccc';
+        propertyDropArea.style.borderColor = '#005f3d';
     });
     
     propertyDropArea.addEventListener('drop', (e) => {
         e.preventDefault();
-        propertyDropArea.style.borderColor = '#ccc';
+        propertyDropArea.style.borderColor = '#005f3d';
         
         if (e.dataTransfer.files.length) {
             propertyFileInput.files = e.dataTransfer.files;
