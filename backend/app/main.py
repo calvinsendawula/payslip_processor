@@ -32,48 +32,55 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-async def process_image_with_ollama(image_path: str, schema: dict) -> dict:
+def load_schema():
+    try:
+        # Update the path to be relative to the backend directory
+        schema_path = os.path.join(os.path.dirname(__file__), '..', 'schema.json')
+        with open(schema_path, 'r') as f:
+            return json.load(f)
+    except Exception as e:
+        logger.error(f"Error loading schema: {str(e)}")
+        return None
+
+async def process_image_with_ollama(image_path: str, schema_type: str) -> dict:
     """Process a single image with Ollama's LLaVA model"""
     try:
+        # Load the schema
+        schema = load_schema()
+        if not schema or schema_type not in schema:
+            logger.error(f"Schema not found for type: {schema_type}")
+            return None
+
         # Convert image to base64
         with open(image_path, "rb") as image_file:
             import base64
             image_data = base64.b64encode(image_file.read()).decode()
 
-        # Prepare the prompt
-        prompt = """
-        Analysiere diese deutsche Gehaltsabrechnung sehr genau. Du musst bestimmte Textfelder finden und extrahieren.
+        # Update the prompt section
+        prompt = f"""
+        Analysiere diese deutsche Gehaltsabrechnung und extrahiere die folgenden Informationen.
 
-        Schritt 1: Mitarbeiterinformationen:
-        - Name: Suche nach dem vollständigen Namen des Mitarbeiters (oft im oberen Bereich, nach "Frau" oder "Herr")
-        - ID: Suche nach "SV-Schlüssel", "Personalnummer" oder ähnlichen Kennungen
+        WICHTIG: Gib NUR ein JSON-Objekt zurück, das EXAKT diesem Format entspricht:
+        {{
+            "employee": {{
+                "name": "Name des Mitarbeiters",
+                "id": "12345"
+            }},
+            "payment": {{
+                "gross": 1234.56,
+                "net": 987.65,
+                "deductions": 246.91
+            }}
+        }}
 
-        Schritt 2: Zahlungsinformationen (oft am unteren Rand der Abrechnung):
-        - Bruttogehalt: Suche nach "Gesamt-Brutto" oder "Brutto" (Betrag in Euro)
-        - Nettogehalt: Suche nach "Auszahlungsbetrag", "Netto" oder "Gesamt-Netto" (Betrag in Euro)
-        - Abzüge: Suche nach "Netto-Abzug" oder berechne die Differenz zwischen Brutto und Netto
-
-        Gib die extrahierten Informationen in diesem JSON-Format zurück:
-        {
-            "employee": {
-                "name": "<exakter Name des Mitarbeiters>",
-                "id": "<SV-Schlüssel oder Personalnummer als String>"
-            },
-            "payment": {
-                "gross": <Bruttobetrag als Zahl ohne Währungssymbol>,
-                "net": <Nettobetrag als Zahl ohne Währungssymbol>,
-                "deductions": <Abzüge als Zahl ohne Währungssymbol>
-            }
-        }
-
-        Wichtige Regeln:
-        - Extrahiere die Werte EXAKT wie sie erscheinen
-        - Entferne Währungssymbole (€) und gib nur die Zahlen zurück
-        - Verwende Punkt statt Komma für Dezimalstellen (z.B. 1234.56 statt 1.234,56)
-        - Wenn du einen Wert nicht finden kannst, gib "unknown" zurück
-        - Achte besonders auf die Tabellen am Ende des Dokuments, dort stehen oft die Summen
-        - Gib NUR das JSON-Objekt zurück, ohne zusätzlichen Text
-        - Die ID muss immer als String in Anführungszeichen zurückgegeben werden
+        Regeln:
+        - Gib NUR das JSON zurück, KEINE Erklärungen oder Analysen
+        - Zahlen müssen als reine Zahlen ohne Anführungszeichen erscheinen
+        - Entferne alle Währungssymbole (€) von Zahlenwerten
+        - Verwende Punkt statt Komma für Dezimalstellen
+        - Die ID muss als String in Anführungszeichen stehen
+        - Der Name muss als String in Anführungszeichen stehen
+        - Keine zusätzlichen Felder wie "type" hinzufügen
         """
 
         logger.info("Calling Llama 3.2 Vision API...")
@@ -140,33 +147,56 @@ async def process_image_with_ollama(image_path: str, schema: dict) -> dict:
                 return None
         
         # Ensure the extracted data matches the expected schema
-        validated_data = {}
-        for key, subschema in schema.items():
-            if key not in extracted_data:
-                validated_data[key] = {subfield: "unknown" for subfield in subschema}
-                continue
-                
-            validated_data[key] = {}
-            for subfield in subschema:
-                if subfield not in extracted_data[key] or extracted_data[key][subfield] == "unknown":
-                    validated_data[key][subfield] = "unknown"
-                else:
-                    validated_data[key][subfield] = extracted_data[key][subfield]
-        
-        # Special case: Calculate deductions if missing but we have gross and net
-        if "payment" in validated_data:
-            if validated_data["payment"].get("deductions") == "unknown" and \
-               validated_data["payment"].get("gross") != "unknown" and \
-               validated_data["payment"].get("net") != "unknown":
+        validated_data = {
+            "employee": {
+                "name": "unknown",
+                "id": "unknown"
+            },
+            "payment": {
+                "gross": 0,
+                "net": 0,
+                "deductions": 0
+            }
+        }
+
+        try:
+            # Remove the "type" field if it exists
+            if "type" in extracted_data:
+                del extracted_data["type"]
+
+            # Validate employee data
+            if "employee" in extracted_data:
+                emp_data = extracted_data["employee"]
+                validated_data["employee"]["name"] = emp_data.get("name", "unknown")
+                # Clean up ID - remove extra quotes if present
+                id_value = emp_data.get("id", "unknown")
+                if isinstance(id_value, str):
+                    id_value = id_value.replace('"', '')
+                validated_data["employee"]["id"] = id_value
+
+            # Validate payment data
+            if "payment" in extracted_data:
+                pay_data = extracted_data["payment"]
                 try:
-                    gross = float(validated_data["payment"]["gross"])
-                    net = float(validated_data["payment"]["net"])
-                    validated_data["payment"]["deductions"] = gross - net
-                    logger.info(f"Calculated missing deductions: {validated_data['payment']['deductions']}")
+                    validated_data["payment"]["gross"] = float(pay_data.get("gross", 0))
+                    validated_data["payment"]["net"] = float(pay_data.get("net", 0))
+                    validated_data["payment"]["deductions"] = float(pay_data.get("deductions", 0))
                 except (ValueError, TypeError) as e:
-                    logger.error(f"Error calculating deductions: {e}")
-        
-        return validated_data
+                    logger.error(f"Error converting payment values: {e}")
+
+            # Verify we have at least some valid data
+            if (validated_data["employee"]["name"] == "unknown" and 
+                validated_data["employee"]["id"] == "unknown" and
+                validated_data["payment"]["gross"] == 0 and
+                validated_data["payment"]["net"] == 0):
+                logger.error("No valid data found in extracted content")
+                return None
+
+            return validated_data
+
+        except Exception as e:
+            logger.error(f"Error validating extracted data: {e}")
+            return None
 
     except Exception as e:
         logger.error(f"Error processing image with Ollama: {e}")
@@ -473,14 +503,8 @@ async def process_payslip(
                 logging.info(f"Attempting to extract data from page {page_idx + 1}")
                 preprocessed_path = await preprocess_image(page_path)
                 
-                # Define the expected schema
-                schema = {
-                    "employee": ["name", "id"],
-                    "payment": ["gross", "net", "deductions"]
-                }
-                
-                # Extract all data at once using the schema
-                extracted_data = await process_image_with_ollama(preprocessed_path, schema)
+                # Extract data using schema
+                extracted_data = await process_image_with_ollama(preprocessed_path, "payslip")
                 
                 if not extracted_data:
                     logger.warning(f"No data extracted from page {page_idx + 1}")

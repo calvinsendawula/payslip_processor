@@ -15,42 +15,27 @@ def seed_database():
     employees = [
         models.Employee(
             id="0110",  # SV-Schlüssel from the payslip
-            name="Mustermann, Marion",  # Exact name from the payslip
-            expected_gross=4635.59,  # Gesamt-Brutto from the payslip
-            expected_net=1906.21,  # Gesamt-Netto from the payslip
-            expected_deductions=2729.38  # Netto-Abzug from the payslip
+            name="Frau Musterfrau",  # Exact name from the payslip
+            expected_gross=3214.00,  # Actual Brutto from the payslip
+            expected_net=2000.00,    # Intentionally wrong net amount
+            expected_deductions=1214.00  # Adjusted for the discrepancy
         ),
         # Add variations of the employee data to match different AI extractions
         models.Employee(
-            id="12345",  # Extracted from the image as "SV-Schlüssel: 12345"
-            name="Marion Musterfrau",  # Extracted from the image
-            expected_gross=4635.59,  # Extracted from the image
-            expected_net=3729.38,  # Extracted from the image
-            expected_deductions=806.21  # Extracted from the image
+            id="12345",  # Alternative ID format
+            name="Marion Musterfrau",  # Alternative name format
+            expected_gross=3214.00,  # Same values as they should match
+            expected_net=2000.00,    # Same intentionally wrong net amount
+            expected_deductions=1214.00  # Adjusted for the discrepancy
         ),
-        # Add another variation with "Frau" prefix
+        # This variation demonstrates fraud detection - intentionally wrong net amount
         models.Employee(
-            id="0110",  # Another possible extraction
-            name="Frau Marion Musterfrau",  # Another possible extraction
-            expected_gross=4635.59,
-            expected_net=3214.00,
-            expected_deductions=1421.59
-        ),
-        models.Employee(
-            id="EMP67890",
-            name="Anna Schmidt",
-            expected_gross=3500.00,
-            expected_net=2200.00,
-            expected_deductions=1300.00
-        ),
-        # Add more variations to match what the AI is extracting
-        models.Employee(
-            id="12345",  # Extracted from the image as "SV-12345"
-            name="Frau Musterfrau",  # Extracted from the image
-            expected_gross=4635.59,  # Extracted from the image
-            expected_net=3214.00,  # Extracted from the image
-            expected_deductions=1421.59  # Calculated difference
-        ),
+            id="55566",  # Another possible ID format
+            name="Frau Marion Musterfrau",  # Another name variation
+            expected_gross=3214.00,  # Correct gross amount
+            expected_net=2000.00,    # Intentionally wrong net amount
+            expected_deductions=1214.00  # Adjusted for the discrepancy
+        )
     ]
     
     # Remove duplicates based on ID

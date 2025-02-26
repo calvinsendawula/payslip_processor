@@ -1,0 +1,54 @@
+{
+    "payslip": {
+        "type": "object",
+        "required": ["employee", "payment"],
+        "properties": {
+            "employee": {
+                "type": "object",
+                "required": ["name", "id"],
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "description": "Full name of the employee as shown on payslip"
+                    },
+                    "id": {
+                        "type": "string",
+                        "description": "Employee ID or SV-Schlüssel number"
+                    }
+                }
+            },
+            "payment": {
+                "type": "object",
+                "required": ["gross", "net", "deductions"],
+                "properties": {
+                    "gross": {
+                        "type": "number",
+                        "description": "Gross payment amount without currency symbol"
+                    },
+                    "net": {
+                        "type": "number",
+                        "description": "Net payment amount without currency symbol"
+                    },
+                    "deductions": {
+                        "type": "number",
+                        "description": "Total deductions amount without currency symbol"
+                    }
+                }
+            }
+        }
+    },
+    "property": {
+        "type": "object",
+        "required": ["living_space", "purchase_price"],
+        "properties": {
+            "living_space": {
+                "type": "string",
+                "description": "Living space measurement including unit (e.g., '120 m²')"
+            },
+            "purchase_price": {
+                "type": "string",
+                "description": "Purchase price including currency symbol (e.g., '300.000 €')"
+            }
+        }
+    }
+} 
