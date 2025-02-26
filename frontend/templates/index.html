@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="de">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Document Processing Dashboard</title>
+    <title>Dokumentenverarbeitung Dashboard</title>
     <link rel="stylesheet" href="/static/css/styles.css">
     <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&display=swap" rel="stylesheet">
     <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
@@ -12,17 +12,18 @@
     <div class="dashboard">
         <div class="sidebar">
             <div class="sidebar-header">
-                <h2>Document Processor</h2>
+                <h2>DokProz</h2>
+                <p class="sidebar-subtitle">Dokumenten-Prozessor</p>
             </div>
             <nav class="sidebar-nav">
                 <ul>
                     <li class="nav-item active" data-tab="payslips">
                         <span class="material-icons">description</span>
-                        <span>Payslips</span>
+                        <span>Gehaltsabrechnungen</span>
                     </li>
                     <li class="nav-item" data-tab="properties">
                         <span class="material-icons">home</span>
-                        <span>Property Listings</span>
+                        <span>Immobilienangebote</span>
                     </li>
                 </ul>
             </nav>
@@ -31,37 +32,37 @@
         <div class="main-content">
             <div class="tab-content active" id="payslips-tab">
                 <div class="content-header">
-                    <h1>Payslip Processor</h1>
-                    <p>Upload a payslip to extract and validate information</p>
+                    <h1>Gehaltsabrechnungs-Verarbeitung</h1>
+                    <p>Laden Sie eine Gehaltsabrechnung hoch, um Informationen zu extrahieren und zu validieren</p>
                 </div>
                 
                 <div class="upload-container" id="payslip-upload">
                     <div class="upload-area" id="payslip-drop-area">
                         <span class="material-icons">cloud_upload</span>
-                        <p>Drag & drop a payslip file here or click to browse</p>
+                        <p>Ziehen Sie eine Gehaltsabrechnung hierher oder klicken Sie zum Durchsuchen</p>
                         <input type="file" id="payslip-file-input" accept=".pdf,.png,.jpg,.jpeg" hidden>
                     </div>
-                    <button id="payslip-upload-btn" class="upload-btn">Upload Payslip</button>
+                    <button id="payslip-upload-btn" class="upload-btn">Gehaltsabrechnung hochladen</button>
                 </div>
                 
                 <div class="results-container" id="payslip-results">
                     <div class="loading-indicator" id="payslip-loading">
                         <div class="spinner"></div>
-                        <p>Processing payslip...</p>
+                        <p>Gehaltsabrechnung wird verarbeitet...</p>
                     </div>
                     
                     <div class="results-content" id="payslip-content">
-                        <h2>Payslip Analysis</h2>
+                        <h2>Gehaltsabrechnungs-Analyse</h2>
                         <div class="results-summary">
                             <div class="summary-item" id="payslip-status">
                                 <span class="material-icons">check_circle</span>
-                                <span>Payslip validated successfully</span>
+                                <span>Gehaltsabrechnung erfolgreich validiert</span>
                             </div>
                         </div>
                         
                         <div class="results-details">
                             <div class="detail-section">
-                                <h3>Employee Information</h3>
+                                <h3>Mitarbeiterinformationen</h3>
                                 <div class="detail-item">
                                     <span class="detail-match" id="employee-name-match">
                                         <span class="material-icons">check_circle</span>
@@ -73,12 +74,12 @@
                             </div>
                             
                             <div class="detail-section">
-                                <h3>Payment Information</h3>
+                                <h3>Zahlungsinformationen</h3>
                                 <div class="detail-item">
                                     <span class="detail-match" id="payment-gross-match">
                                         <span class="material-icons">check_circle</span>
                                     </span>
-                                    <span class="detail-label">Gross Pay:</span>
+                                    <span class="detail-label">Bruttogehalt:</span>
                                     <span class="detail-value" id="payment-gross"></span>
                                     <span class="detail-expected" id="payment-gross-expected"></span>
                                 </div>
@@ -86,7 +87,7 @@
                                     <span class="detail-match" id="payment-net-match">
                                         <span class="material-icons">check_circle</span>
                                     </span>
-                                    <span class="detail-label">Net Pay:</span>
+                                    <span class="detail-label">Nettogehalt:</span>
                                     <span class="detail-value" id="payment-net"></span>
                                     <span class="detail-expected" id="payment-net-expected"></span>
                                 </div>
@@ -98,37 +99,37 @@
             
             <div class="tab-content" id="properties-tab">
                 <div class="content-header">
-                    <h1>Property Listing Processor</h1>
-                    <p>Upload a property listing to extract information</p>
+                    <h1>Immobilienangebots-Verarbeitung</h1>
+                    <p>Laden Sie ein Immobilienangebot hoch, um Informationen zu extrahieren</p>
                 </div>
                 
                 <div class="upload-container" id="property-upload">
                     <div class="upload-area" id="property-drop-area">
                         <span class="material-icons">cloud_upload</span>
-                        <p>Drag & drop a property listing file here or click to browse</p>
+                        <p>Ziehen Sie ein Immobilienangebot hierher oder klicken Sie zum Durchsuchen</p>
                         <input type="file" id="property-file-input" accept=".pdf,.png,.jpg,.jpeg" hidden>
                     </div>
-                    <button id="property-upload-btn" class="upload-btn">Upload Property Listing</button>
+                    <button id="property-upload-btn" class="upload-btn">Immobilienangebot hochladen</button>
                 </div>
                 
                 <div class="results-container" id="property-results">
                     <div class="loading-indicator" id="property-loading">
                         <div class="spinner"></div>
-                        <p>Processing property listing...</p>
+                        <p>Immobilienangebot wird verarbeitet...</p>
                     </div>
                     
                     <div class="results-content" id="property-content">
-                        <h2>Property Listing Analysis</h2>
+                        <h2>Immobilienangebots-Analyse</h2>
                         
                         <div class="results-details">
                             <div class="detail-section">
-                                <h3>Property Information</h3>
+                                <h3>Immobilieninformationen</h3>
                                 <div class="detail-item">
-                                    <span class="detail-label">Living Space:</span>
+                                    <span class="detail-label">Wohnfläche:</span>
                                     <span class="detail-value" id="property-space"></span>
                                 </div>
                                 <div class="detail-item">
-                                    <span class="detail-label">Purchase Price:</span>
+                                    <span class="detail-label">Kaufpreis:</span>
                                     <span class="detail-value" id="property-price"></span>
                                 </div>
                             </div>

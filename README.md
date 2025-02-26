@@ -1,11 +1,23 @@
-# Payslip Processor
+# Updated README for Payslip Processor
+# Gehaltsabrechnungs-Verarbeitung
 
 A full-stack application that processes payslips using AI vision to extract and validate payment information against stored records.
+
+## Overview
+
+This application demonstrates how AI vision models can be used to extract structured information from documents. It uses Llama 3.2 Vision to analyze German payslips and property listings, extracting key information and validating it against expected values.
+
+## Features
+
+- **Payslip Processing**: Extract employee information and payment details from German payslips
+- **Property Listing Analysis**: Extract living space and purchase price from German property listings
+- **Validation System**: Compare extracted values with expected values in the database
+- **Error Detection**: Highlight discrepancies between extracted and expected values
+- **Demonstration Mode**: Includes intentional discrepancies to showcase error detection capabilities
 
 ## Requirements
 
 - Python 3.11.5
-- Node.js 18+ 
 - Ollama (for AI vision processing)
 - poppler-utils (for PDF processing)
 - GPU with 8GB+ VRAM recommended (can work with less but will be slower)
@@ -24,96 +36,118 @@ A full-stack application that processes payslips using AI vision to extract and 
 1. Visit [Ollama's website](https://ollama.ai/) and download the appropriate version for your OS
 2. Install Ollama following their instructions
 3. Start the Llama model:
+
 ```bash
 ollama run llama3.2-vision
 ```
 
 This will download and run the model if it's not already present (download size should be around 6GB for the 11B parameter model). Keep this terminal window open as it needs to stay running.
 
-### 2. Backend Setup
+### 2. Install Dependencies
 
-1. Open a new terminal window and create and activate a virtual environment:
+#### Backend (FastAPI)
+
 ```bash
+cd backend
 python -m venv venv
 source venv/bin/activate  # On Windows: venv\Scripts\activate
-```
-
-2. Install Python dependencies:
-```bash
 pip install -r requirements.txt
 ```
 
-3. Install poppler-utils (required for PDF processing):
-- On Ubuntu/Debian: 
-  ```bash
-  sudo apt-get install poppler-utils
-  ```
-- On macOS: 
-  ```bash
-  brew install poppler
-  ```
-- On Windows:
-  1. Download the latest release (e.g., `Release-24.08.0-0.zip`) from [poppler-windows releases](https://github.com/oschwartz10612/poppler-windows/releases/)
-  2. Extract the ZIP file to a permanent location (e.g., `C:\Program Files\poppler`)
-  3. Add the bin directory to your system's PATH environment variable:
-     - Open System Properties > Advanced > Environment Variables
-     - Under System Variables, find and select "Path"
-     - Click "Edit" and add the path to your poppler bin directory (e.g., `C:\Program Files\poppler\bin`)
-     - Click "OK" to save
+#### Frontend (Flask)
 
-4. Initialize the database with mock data:
+```bash
+cd frontend
+python -m venv venv
+source venv/bin/activate  # On Windows: venv\Scripts\activate
+pip install -r requirements.txt
+```
+
+### 3. Install PDF Processing Tools
+
+#### Windows
+Download and install poppler from: https://github.com/oschwartz10612/poppler-windows/releases/
+Add the bin directory to your PATH.
+
+#### macOS
+```bash
+brew install poppler
+```
+
+#### Linux (Ubuntu/Debian)
+```bash
+sudo apt-get install -y poppler-utils
+```
+
+### 4. Seed the Database
+
 ```bash
 cd backend
 python -m app.seed_db
 ```
 
-5. Start the backend server:
+This will create a SQLite database with sample employee records that match the provided sample payslips.
+
+### 5. Start the Backend
+
 ```bash
+cd backend
 uvicorn app.main:app --reload
 ```
 
-The backend will be available at `http://localhost:8000`
+### 6. Start the Frontend
 
-### 3. Frontend Setup
+In a new terminal:
 
-1. Open a new terminal window and install Node.js dependencies:
 ```bash
 cd frontend
-npm install
+python app.py
 ```
 
-2. Start the development server:
-```bash
-npm run dev
-```
+### 7. Access the Application
 
-The frontend will be available at `http://localhost:5173`
+Open your browser and navigate to: http://localhost:5173
 
-## Usage
+## Using the Application
 
-1. Ensure Ollama is running with the Llama 3.2 Vision 11B model (`ollama run llama3.2-vision`)
-2. Ensure the backend server is running
-3. Open the frontend application in your browser
-4. Upload a payslip (PDF or image format)
-5. The system will process the payslip and compare the extracted information with stored records
+1. Select the "Gehaltsabrechnung" tab for payslip processing or "Immobilienangebot" tab for property listings
+2. Drag and drop a PDF or image file, or click to select a file
+3. Click "Hochladen und Analysieren" to process the file
+4. View the extracted information and validation results
 
-## Sample Data
+### Sample Files
 
-The repository includes two sample payslips in the `sample` folder:
-- `payslip_true_positive.pdf`: A payslip that matches the expected values in the database
-- `payslip_litmus.pdf`: A payslip with intentional inconsistencies to demonstrate the validation system
+The repository includes sample files in the `samples` directory:
+- `german_payslip.pdf`: A sample German payslip
+- `german_house_listing.pdf`: A sample German property listing
+
+## Demonstration Features
+
+### Intentional Discrepancy
+
+The system includes an intentional discrepancy in the database to showcase the error detection capabilities:
+
+- The sample payslip shows a net amount of 2,729.38 €
+- The database has an expected net amount of 3,214.00 € (which is actually the base salary amount)
+- When processing the payslip, the system will correctly extract 2,729.38 € but flag it as an error since it doesn't match the expected value
+
+This demonstrates how the system can detect potential issues in payroll processing, useful for identifying mistakes or fraud.
+
+## Customization
 
 **Important**: The system is configured specifically for these sample payslips. To use it with different payslips, you'll need to:
 1. Modify the seed data in `backend/app/seed_db.py` to match your expected values
 2. Adjust the extraction logic in `backend/app/main.py` to match your payslip format
-3. Update the prompt template to extract the relevant information from your payslip format
+3. Update the prompt template in `aisettings` to extract the relevant information from your payslip format
 
-## Notes
+## System Architecture
 
-- The system requires Ollama running with Llama 3.2 Vision 11B model
-- Mock employee data is provided through the seed_db script and corresponds to the sample payslips
-- Supported file formats: PDF, PNG, JPG, JPEG
-- Make sure you have at least 16GB of RAM available for running the Llama model
+The system uses Ollama's Llama 3.2 Vision 11B parameters model for processing payslip images. The model runs locally through Ollama's API, which the backend communicates with to extract payment information from uploaded documents.
+
+- **Frontend**: Flask web application that handles file uploads and displays results
+- **Backend**: FastAPI application that processes files and communicates with the AI model
+- **Database**: SQLite database that stores expected values for validation
+- **AI Model**: Llama 3.2 Vision running locally through Ollama
 
 ## API Documentation
 
@@ -123,12 +157,12 @@ The backend provides the following endpoints:
   - Accepts: PDF or image files (multipart/form-data)
   - Returns: JSON with comparison results
 
-## Development
+- `POST /api/process-property`: Process a property listing and return extracted information
+  - Accepts: PDF or image files (multipart/form-data)
+  - Returns: JSON with extracted property details
 
-- Backend: FastAPI + SQLAlchemy + Ollama
-- Frontend: React + Material-UI
-- Database: SQLite
+## Troubleshooting
 
-## System Architecture
-
-The system uses Ollama's Llama 3.2 Vision 11B parameters model for processing payslip images. The model runs locally through Ollama's API, which the backend communicates with to extract payment information from uploaded documents.
+- **Model Loading Issues**: If Ollama fails to load the model, ensure you have sufficient RAM and VRAM
+- **PDF Processing Errors**: Make sure poppler-utils is correctly installed and accessible in your PATH
+- **Extraction Accuracy**: The system is optimized for the provided sample files; other formats require prompt adjustments

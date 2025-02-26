@@ -1,0 +1,28 @@
+{
+  "model": "llama3.2-vision",
+  "temperature": 0.1,
+  "max_tokens": 1000,
+  "prompts": {
+    "payslip": {
+      "description": "Prompt for extracting information from German payslips",
+      "text": "Analysiere diese deutsche Gehaltsabrechnung sehr genau. Du musst bestimmte Textfelder finden und extrahieren.\n\nSchritt 1: Mitarbeiterinformationen:\n- Name: Suche im oberen linken Bereich nach dem vollständigen Namen des Mitarbeiters. Achte besonders auf die Zeile nach \"Frau\" oder \"Herr\". Extrahiere den Namen EXAKT wie er erscheint, mit korrekter Schreibweise.\n- ID: Suche nach \"SV-Schlüssel\", \"Personalnummer\" oder ähnlichen Kennungen, oft am unteren Rand des Dokuments.\n\nSchritt 2: Zahlungsinformationen:\n- Bruttogehalt: Suche nach \"Gesamt-Brutto\", \"Brutto-Bezüge gesamt\" oder addiere die Positionen in der Tabelle (z.B. Gehalt + Provision). Achte auf die Spalte \"Betrag\" rechts in der Tabelle.\n- Nettogehalt: Suche nach \"Auszahlungsbetrag\", \"Überweisung\" oder \"Netto\" am Ende der Abrechnung. Dies ist oft der letzte Betrag im Dokument.\n- Abzüge: Suche nach \"Gesamt-Abzüge\" oder berechne die Differenz zwischen Brutto und Netto.\n\nGib die extrahierten Informationen in diesem JSON-Format zurück:\n{\n    \"employee\": {\n        \"name\": \"<exakter Name des Mitarbeiters>\",\n        \"id\": \"<SV-Schlüssel oder Personalnummer>\"\n    },\n    \"payment\": {\n        \"gross\": <Bruttobetrag als Zahl ohne Währungssymbol>,\n        \"net\": <Nettobetrag als Zahl ohne Währungssymbol>,\n        \"deductions\": <Abzüge als Zahl ohne Währungssymbol>\n    }\n}\n\nWichtige Regeln:\n- Extrahiere die Werte EXAKT wie sie erscheinen, besonders bei Namen achte auf die korrekte Schreibweise\n- Prüfe den Namen mehrfach auf Tippfehler - es ist wichtig, dass der Name 100% korrekt ist\n- Entferne Währungssymbole (€) und gib nur die Zahlen zurück\n- Verwende Punkt statt Komma für Dezimalstellen (z.B. 1234.56 statt 1.234,56)\n- Wenn du einen Wert nicht finden kannst, gib \"unknown\" zurück\n- Achte besonders auf die Tabellen im Dokument, dort stehen oft die wichtigsten Werte\n- Für das Bruttogehalt: Wenn du \"Gesamt-Brutto\" nicht findest, addiere die Positionen wie \"Gehalt\" und \"Provision\"\n- Für das Nettogehalt: Suche nach dem letzten Betrag in der Abrechnung, oft als \"Auszahlungsbetrag\" oder \"Überweisung\" bezeichnet\n- Gib NUR das JSON-Objekt zurück, ohne zusätzlichen Text"
+    },
+    "property": {
+      "description": "Prompt for extracting information from German property listings",
+      "text": "Analysiere dieses Immobilienangebot. Du musst folgende spezifische Informationen finden und extrahieren:\n\n1. Die Wohnfläche (in Quadratmetern, m²)\n2. Den Kaufpreis (in Euro, €)\n\nGib die extrahierten Werte in dieser JSON-Struktur zurück:\n{\n    \"living_space\": \"<exakter Text für die Wohnfläche, inklusive Einheit>\",\n    \"purchase_price\": \"<exakter Text für den Kaufpreis, inklusive Währungssymbol>\"\n}\n\nRegeln:\n- Extrahiere die Werte EXAKT wie sie erscheinen\n- Gib nur die JSON-Struktur zurück\n- Wenn du einen Wert nicht klar lesen kannst, gib \"unklar\" zurück\n- Erfinde oder rate keine Werte"
+    }
+  },
+  "extraction_settings": {
+    "payslip": {
+      "employee_name_patterns": ["Frau", "Herr", "Name:", "Mustermann", "Musterfrau"],
+      "employee_id_patterns": ["SV-Nummer", "SV-Schlüssel", "Personalnummer", "ID:"],
+      "gross_patterns": ["Gesamt-Brutto", "Brutto-Bezüge gesamt", "Gehalt", "Provision", "Grundgehalt"],
+      "net_patterns": ["Auszahlungsbetrag", "Netto-Bezug", "Überweisung", "Netto"],
+      "deduction_patterns": ["Gesamt-Abzüge", "Abzüge", "Steuer", "Sozialversicherung"]
+    },
+    "property": {
+      "living_space_patterns": ["Wohnfläche", "ca.", "m²"],
+      "price_patterns": ["Kaufpreis", "Preis", "€"]
+    }
+  }
+} 

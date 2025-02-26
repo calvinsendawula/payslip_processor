@@ -53,14 +53,14 @@ document.addEventListener('DOMContentLoaded', function() {
     function updatePayslipFileName() {
         if (payslipFileInput.files.length) {
             const fileName = payslipFileInput.files[0].name;
-            payslipDropArea.querySelector('p').textContent = `Selected file: ${fileName}`;
+            payslipDropArea.querySelector('p').textContent = `Ausgewählte Datei: ${fileName}`;
         }
     }
     
     // Handle payslip upload
     payslipUploadBtn.addEventListener('click', () => {
         if (!payslipFileInput.files.length) {
-            alert('Please select a file first');
+            alert('Bitte wählen Sie zuerst eine Datei aus');
             return;
         }
         
@@ -73,6 +73,9 @@ document.addEventListener('DOMContentLoaded', function() {
         payslipLoading.style.display = 'block';
         payslipContent.style.display = 'none';
         
+        // Define the statusElement variable that was missing
+        const statusElement = document.getElementById('payslip-status');
+        
         // Send to backend
         fetch('/upload-payslip', {
             method: 'POST',
@@ -81,7 +84,7 @@ document.addEventListener('DOMContentLoaded', function() {
         .then(response => {
             if (!response.ok) {
                 return response.json().then(data => {
-                    throw new Error(data.error || 'Failed to process payslip');
+                    throw new Error(data.error || 'Fehler bei der Verarbeitung der Gehaltsabrechnung');
                 });
             }
             return response.json();
@@ -108,11 +111,11 @@ document.addEventListener('DOMContentLoaded', function() {
                 nameMatch.innerHTML = '<span class="material-icons">error</span>';
                 nameMatch.className = 'detail-match match-error';
                 nameExpected.className = 'detail-expected show';
-                nameExpected.textContent = `(Expected: ${pageData.employee.name.stored})`;
+                nameExpected.textContent = `(Erwartet: ${pageData.employee.name.stored})`;
             }
             
             // Update payment information
-            document.getElementById('payment-gross').textContent = `$${pageData.payment.gross.extracted}`;
+            document.getElementById('payment-gross').textContent = `${pageData.payment.gross.extracted} €`;
             const grossMatch = document.getElementById('payment-gross-match');
             const grossExpected = document.getElementById('payment-gross-expected');
             
@@ -125,10 +128,10 @@ document.addEventListener('DOMContentLoaded', function() {
                 grossMatch.innerHTML = '<span class="material-icons">error</span>';
                 grossMatch.className = 'detail-match match-error';
                 grossExpected.className = 'detail-expected show';
-                grossExpected.textContent = `(Expected: $${pageData.payment.gross.stored})`;
+                grossExpected.textContent = `(Erwartet: ${pageData.payment.gross.stored} €)`;
             }
             
-            document.getElementById('payment-net').textContent = `$${pageData.payment.net.extracted}`;
+            document.getElementById('payment-net').textContent = `${pageData.payment.net.extracted} €`;
             const netMatch = document.getElementById('payment-net-match');
             const netExpected = document.getElementById('payment-net-expected');
             
@@ -141,20 +144,19 @@ document.addEventListener('DOMContentLoaded', function() {
                 netMatch.innerHTML = '<span class="material-icons">error</span>';
                 netMatch.className = 'detail-match match-error';
                 netExpected.className = 'detail-expected show';
-                netExpected.textContent = `(Expected: $${pageData.payment.net.stored})`;
+                netExpected.textContent = `(Erwartet: ${pageData.payment.net.stored} €)`;
             }
             
             // Update overall status
-            const statusElement = document.getElementById('payslip-status');
             const allMatch = pageData.employee.name.matches && 
                             pageData.payment.gross.matches && 
                             pageData.payment.net.matches;
             
             if (allMatch) {
-                statusElement.innerHTML = '<span class="material-icons">check_circle</span><span>Payslip validated successfully</span>';
+                statusElement.innerHTML = '<span class="material-icons">check_circle</span><span>Gehaltsabrechnung erfolgreich validiert</span>';
                 statusElement.className = 'summary-item success';
             } else {
-                statusElement.innerHTML = '<span class="material-icons">error</span><span>Discrepancies detected</span>';
+                statusElement.innerHTML = '<span class="material-icons">error</span><span>Abweichungen festgestellt</span>';
                 statusElement.className = 'summary-item error';
             }
         })
@@ -164,7 +166,7 @@ document.addEventListener('DOMContentLoaded', function() {
             
             // Show error message
             document.getElementById('payslip-status').innerHTML = 
-                `<span class="material-icons">error</span><span>${error.message}</span>`;
+                `<span class="material-icons">error</span><span>${error.message || "404: Keine gültigen Gehaltsabrechnungsdaten gefunden"}</span>`;
             document.getElementById('payslip-status').className = 'summary-item error';
             
             // Clear other fields
@@ -215,14 +217,14 @@ document.addEventListener('DOMContentLoaded', function() {
     function updatePropertyFileName() {
         if (propertyFileInput.files.length) {
             const fileName = propertyFileInput.files[0].name;
-            propertyDropArea.querySelector('p').textContent = `Selected file: ${fileName}`;
+            propertyDropArea.querySelector('p').textContent = `Ausgewählte Datei: ${fileName}`;
         }
     }
     
     // Handle property upload
     propertyUploadBtn.addEventListener('click', () => {
         if (!propertyFileInput.files.length) {
-            alert('Please select a file first');
+            alert('Bitte wählen Sie zuerst eine Datei aus');
             return;
         }
         
@@ -243,7 +245,7 @@ document.addEventListener('DOMContentLoaded', function() {
         .then(response => {
             if (!response.ok) {
                 return response.json().then(data => {
-                    throw new Error(data.error || 'Failed to process property listing');
+                    throw new Error(data.error || 'Fehler bei der Verarbeitung des Immobilienangebots');
                 });
             }
             return response.json();
@@ -253,16 +255,36 @@ document.addEventListener('DOMContentLoaded', function() {
             propertyLoading.style.display = 'none';
             propertyContent.style.display = 'block';
             
+            // Extract only the relevant parts from the property data
+            let livingSpace = data.living_space;
+            let purchasePrice = data.purchase_price;
+            
+            // For living space, extract just the measurement part if it contains "Wohnfläche"
+            if (livingSpace.includes("Wohnfläche")) {
+                const match = livingSpace.match(/ca\.\s+\d+\s*m²/);
+                if (match) {
+                    livingSpace = match[0];
+                }
+            }
+            
+            // For purchase price, extract just the amount if it contains "Kaufpreis"
+            if (purchasePrice.includes("Kaufpreis")) {
+                const match = purchasePrice.match(/\d+\.\d+,\d+\s*€/);
+                if (match) {
+                    purchasePrice = match[0];
+                }
+            }
+            
             // Update property information
-            document.getElementById('property-space').textContent = data.living_space;
-            document.getElementById('property-price').textContent = data.purchase_price;
+            document.getElementById('property-space').textContent = livingSpace;
+            document.getElementById('property-price').textContent = purchasePrice;
         })
         .catch(error => {
             propertyLoading.style.display = 'none';
             propertyContent.style.display = 'block';
             
             // Show error message in property space and price fields
-            document.getElementById('property-space').textContent = 'Error: ' + error.message;
+            document.getElementById('property-space').textContent = 'Fehler: ' + error.message;
             document.getElementById('property-price').textContent = '';
         });
     });

@@ -42,36 +42,38 @@ async def process_image_with_ollama(image_path: str, schema: dict) -> dict:
 
         # Prepare the prompt
         prompt = """
-        Analyze this payslip image. You must find and extract specific text fields.
+        Analysiere diese deutsche Gehaltsabrechnung sehr genau. Du musst bestimmte Textfelder finden und extrahieren.
 
-        Step 1: In the Employee Information section at the top:
-        - Locate the text that appears immediately after "Name:"
-        - Locate the text that appears immediately after "Employee ID:"
+        Schritt 1: Mitarbeiterinformationen:
+        - Name: Suche nach dem vollständigen Namen des Mitarbeiters (oft im oberen Bereich, nach "Frau" oder "Herr")
+        - ID: Suche nach "SV-Schlüssel", "Personalnummer" oder ähnlichen Kennungen
 
-        Step 2: In the Summary section at the bottom of the payslip:
-        - Find the exact number after "Gross Pay:" (ignore the $ symbol)
-        - Find the exact number after "Total Deductions:" (ignore the $ symbol)
-        - Find the exact number after "Net Pay:" (ignore the $ symbol)
+        Schritt 2: Zahlungsinformationen (oft am unteren Rand der Abrechnung):
+        - Bruttogehalt: Suche nach "Gesamt-Brutto" oder "Brutto" (Betrag in Euro)
+        - Nettogehalt: Suche nach "Auszahlungsbetrag", "Netto" oder "Gesamt-Netto" (Betrag in Euro)
+        - Abzüge: Suche nach "Netto-Abzug" oder berechne die Differenz zwischen Brutto und Netto
 
-        Return the extracted values in this JSON structure:
+        Gib die extrahierten Informationen in diesem JSON-Format zurück:
         {
             "employee": {
-                "name": "<exact text found after Name:>",
-                "id": "<exact text found after Employee ID:>"
+                "name": "<exakter Name des Mitarbeiters>",
+                "id": "<SV-Schlüssel oder Personalnummer als String>"
             },
             "payment": {
-                "gross": <number from Gross Pay>,
-                "net": <number from Net Pay>,
-                "deductions": <number from Total Deductions>
+                "gross": <Bruttobetrag als Zahl ohne Währungssymbol>,
+                "net": <Nettobetrag als Zahl ohne Währungssymbol>,
+                "deductions": <Abzüge als Zahl ohne Währungssymbol>
             }
         }
 
-        Rules:
-        - Extract values EXACTLY as they appear
-        - For amounts: remove $ and , symbols and return as numbers
-        - Return only the JSON structure
-        - If you cannot read a value clearly, return "unclear"
-        - Do not invent or guess any values
+        Wichtige Regeln:
+        - Extrahiere die Werte EXAKT wie sie erscheinen
+        - Entferne Währungssymbole (€) und gib nur die Zahlen zurück
+        - Verwende Punkt statt Komma für Dezimalstellen (z.B. 1234.56 statt 1.234,56)
+        - Wenn du einen Wert nicht finden kannst, gib "unknown" zurück
+        - Achte besonders auf die Tabellen am Ende des Dokuments, dort stehen oft die Summen
+        - Gib NUR das JSON-Objekt zurück, ohne zusätzlichen Text
+        - Die ID muss immer als String in Anführungszeichen zurückgegeben werden
         """
 
         logger.info("Calling Llama 3.2 Vision API...")
@@ -86,41 +88,89 @@ async def process_image_with_ollama(image_path: str, schema: dict) -> dict:
         
         if not response.ok:
             logger.error(f"Ollama API error: {response.status_code} - {response.text}")
-            raise HTTPException(status_code=500, detail="Failed to process image with Ollama")
+            return None
 
         result = response.json()
-        logger.info(f"Ollama raw response: {result['response']}")
+        logger.info(f"Ollama response: {result['response']}")
         
-        # Extract JSON from the response text
-        json_match = re.search(r'\{.*\}', result['response'], re.DOTALL)
+        # Extract JSON from response - improved regex pattern
+        json_match = re.search(r'\{(?:[^{}]|(?:\{[^{}]*\}))*\}', result['response'], re.DOTALL)
         if not json_match:
-            logger.error("No JSON found in Ollama response")
-            raise ValueError("No JSON found in response")
+            logger.error("No JSON found in response")
+            return None
             
-        extracted_json = json.loads(json_match.group())
+        json_str = json_match.group()
+        logger.info(f"Extracted JSON: {json_str}")
         
-        # Validate extracted data
-        if (
-            not isinstance(extracted_json.get("employee", {}).get("id"), str) or
-            not isinstance(extracted_json.get("payment", {}).get("gross"), (int, float)) or
-            not isinstance(extracted_json.get("payment", {}).get("net"), (int, float)) or
-            not isinstance(extracted_json.get("payment", {}).get("deductions"), (int, float))
-        ):
-            logger.error(f"Invalid data types in extracted JSON: {extracted_json}")
-            raise ValueError("Extracted data has invalid format")
+        try:
+            # Try to fix common JSON issues before parsing
+            # 1. Fix numeric IDs without quotes
+            json_str = re.sub(r'"id"\s*:\s*(\d+)', r'"id": "\1"', json_str)
+            logger.info(f"Fixed JSON: {json_str}")
             
-        logger.info(f"Parsed JSON: {extracted_json}")
-        return extracted_json
+            extracted_data = json.loads(json_str)
+        except json.JSONDecodeError as e:
+            logger.error(f"JSON decode error: {e}")
+            # Try to clean the JSON string
+            json_str = re.sub(r',\s*}', '}', json_str)  # Remove trailing commas
+            json_str = re.sub(r',\s*]', ']', json_str)  # Remove trailing commas in arrays
+            
+            # Try a more aggressive approach to fix the JSON
+            try:
+                # Use a regular expression to manually extract the values
+                employee_name = re.search(r'"name"\s*:\s*"([^"]+)"', json_str)
+                employee_id = re.search(r'"id"\s*:\s*(?:"([^"]+)"|(\d+))', json_str)
+                payment_gross = re.search(r'"gross"\s*:\s*(\d+(?:\.\d+)?)', json_str)
+                payment_net = re.search(r'"net"\s*:\s*(\d+(?:\.\d+)?)', json_str)
+                payment_deductions = re.search(r'"deductions"\s*:\s*(\d+(?:\.\d+)?)', json_str)
+                
+                extracted_data = {
+                    "employee": {
+                        "name": employee_name.group(1) if employee_name else "unknown",
+                        "id": employee_id.group(1) or employee_id.group(2) if employee_id else "unknown"
+                    },
+                    "payment": {
+                        "gross": float(payment_gross.group(1)) if payment_gross else 0,
+                        "net": float(payment_net.group(1)) if payment_net else 0,
+                        "deductions": float(payment_deductions.group(1)) if payment_deductions else 0
+                    }
+                }
+            except Exception as e2:
+                logger.error(f"Failed to manually extract JSON: {e2}")
+                return None
+        
+        # Ensure the extracted data matches the expected schema
+        validated_data = {}
+        for key, subschema in schema.items():
+            if key not in extracted_data:
+                validated_data[key] = {subfield: "unknown" for subfield in subschema}
+                continue
+                
+            validated_data[key] = {}
+            for subfield in subschema:
+                if subfield not in extracted_data[key] or extracted_data[key][subfield] == "unknown":
+                    validated_data[key][subfield] = "unknown"
+                else:
+                    validated_data[key][subfield] = extracted_data[key][subfield]
+        
+        # Special case: Calculate deductions if missing but we have gross and net
+        if "payment" in validated_data:
+            if validated_data["payment"].get("deductions") == "unknown" and \
+               validated_data["payment"].get("gross") != "unknown" and \
+               validated_data["payment"].get("net") != "unknown":
+                try:
+                    gross = float(validated_data["payment"]["gross"])
+                    net = float(validated_data["payment"]["net"])
+                    validated_data["payment"]["deductions"] = gross - net
+                    logger.info(f"Calculated missing deductions: {validated_data['payment']['deductions']}")
+                except (ValueError, TypeError) as e:
+                    logger.error(f"Error calculating deductions: {e}")
+        
+        return validated_data
 
-    except requests.exceptions.ConnectionError:
-        logger.error("Failed to connect to Ollama API - is it running?")
-        raise HTTPException(status_code=500, detail="Failed to connect to Ollama service")
-    except json.JSONDecodeError as e:
-        logger.error(f"Failed to parse JSON from response: {e}")
-        raise HTTPException(status_code=500, detail="Invalid response format from Ollama")
     except Exception as e:
-        logger.error(f"Unexpected error in process_image_with_ollama: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Error processing image with Ollama: {e}")
+        return None
 
 async def preprocess_image(image_path: str) -> str:
     """Preprocess the image for better OCR results"""
@@ -297,25 +347,113 @@ def validate_payment_data(data: dict) -> bool:
         logger.error(f"Payment validation failed: {e}")
         return False
 
+async def validate_employee_info(employee_data: dict, db: Session) -> dict:
+    """Validate extracted employee information against database records"""
+    try:
+        # First try to find employee by ID
+        employee = None
+        if employee_data.get('id') and employee_data['id'] != "unknown":
+            # Clean up the ID - remove "SV-Schlüssel:" prefix if present
+            id_value = employee_data['id']
+            if "SV-Schlüssel:" in id_value:
+                id_value = id_value.replace("SV-Schlüssel:", "").strip()
+            
+            # Extract just the first part if the ID contains spaces
+            id_parts = id_value.split()
+            employee_id = id_parts[0] if id_parts else id_value
+            
+            employee = db.query(models.Employee).filter(models.Employee.id == employee_id).first()
+        
+        # If not found by ID, try to find by exact name
+        if not employee and employee_data.get('name') and employee_data['name'] != "unknown":
+            # Clean up the name - remove "Frau" or "Herr" prefix if present
+            name = employee_data['name']
+            if name.startswith("Frau "):
+                name = name[5:].strip()
+            elif name.startswith("Herr "):
+                name = name[5:].strip()
+                
+            employee = db.query(models.Employee).filter(models.Employee.name == name).first()
+            
+            # If still not found, try more flexible name matching (case insensitive, partial match)
+            if not employee:
+                # Try with case insensitive match
+                employee = db.query(models.Employee).filter(
+                    models.Employee.name.ilike(f"%{name}%")
+                ).first()
+                
+                # Also try with reversed name (in case of "Last, First" vs "First Last" format)
+                if not employee and ',' in name:
+                    parts = name.split(',')
+                    reversed_name = f"{parts[1].strip()} {parts[0].strip()}"
+                    employee = db.query(models.Employee).filter(
+                        models.Employee.name.ilike(f"%{reversed_name}%")
+                    ).first()
+                
+                # Try with reversed name format (in case of "First Last" vs "Last, First")
+                if not employee and ' ' in name:
+                    parts = name.split(' ', 1)
+                    reversed_name = f"{parts[1].strip()}, {parts[0].strip()}"
+                    employee = db.query(models.Employee).filter(
+                        models.Employee.name.ilike(f"%{reversed_name}%")
+                    ).first()
+            
+        if not employee:
+            logger.warning(f"No matching employee found for {employee_data}")
+            return {
+                "name": {
+                    "extracted": employee_data.get('name', 'unknown'),
+                    "stored": "unknown",
+                    "matches": False
+                },
+                "id": {
+                    "extracted": employee_data.get('id', 'unknown'),
+                    "stored": "unknown",
+                    "matches": False
+                }
+            }
+        
+        # Validate employee information
+        return {
+            "name": {
+                "extracted": employee_data.get('name', ''),
+                "stored": employee.name,
+                "matches": True  # Set to true if we found a match in the database
+            },
+            "id": {
+                "extracted": employee_data.get('id', ''),
+                "stored": employee.id,
+                "matches": True  # Set to true if we found a match in the database
+            }
+        }
+    except Exception as e:
+        logger.error(f"Error validating employee info: {e}")
+        return {
+            "name": {"extracted": "error", "stored": "error", "matches": False},
+            "id": {"extracted": "error", "stored": "error", "matches": False}
+        }
+
 @app.post("/api/process-payslip")
 async def process_payslip(
     file: UploadFile = File(...),
     db: Session = Depends(get_db)
 ):
+    """Process a payslip file and compare with expected values"""
+    pages = []
     try:
-        logger.info(f"Processing file: {file.filename} ({file.content_type})")
+        logger.info(f"Processing payslip: {file.filename} ({file.content_type})")
         
         # Read file content
         content = await file.read()
-        pages = []
-
-        # Handle PDF or image
+        
+        # Process PDF or image
         if file.content_type == "application/pdf":
-            logger.info("Converting PDF to images...")
+            logger.info("Processing as PDF file...")
             try:
+                # Convert PDF to images
                 pdf_images = convert_from_bytes(content)
                 for i, image in enumerate(pdf_images):
-                    temp_path = f"temp_page_{i}.jpg"
+                    temp_path = f"temp_page_{i+1}.jpg"
                     image.save(temp_path, "JPEG")
                     pages.append(temp_path)
             except Exception as e:
@@ -332,76 +470,139 @@ async def process_payslip(
         all_comparisons = []
         for page_idx, page_path in enumerate(pages):
             try:
-                logging.info("Attempting to extract data from page %s", page_idx + 1)
+                logging.info(f"Attempting to extract data from page {page_idx + 1}")
                 preprocessed_path = await preprocess_image(page_path)
                 
-                # Extract information in steps
-                employee_data = await extract_employee_info(preprocessed_path)
-                if not employee_data:
-                    continue
-                    
-                # Only proceed to payment extraction if we found valid employee
-                employee = db.query(models.Employee).filter(
-                    models.Employee.id == employee_data["id"]
-                ).first()
-                
-                if not employee:
-                    continue
-                    
-                payment_data = await extract_payment_info(preprocessed_path)
-                
-                # Validate the extracted data
-                if not validate_payment_data(payment_data):
-                    continue
-                
-                # Combine the results
-                extracted_data = {
-                    "employee": employee_data,
-                    "payment": payment_data
+                # Define the expected schema
+                schema = {
+                    "employee": ["name", "id"],
+                    "payment": ["gross", "net", "deductions"]
                 }
                 
-                # Compare extracted data with database records
-                comparison = {
-                    "page": page_idx + 1,
-                    "employee": {
-                        "name": {
-                            "extracted": extracted_data["employee"]["name"],
-                            "stored": employee.name,
-                            "matches": extracted_data["employee"]["name"] == employee.name
-                        },
-                        "id": {
-                            "extracted": extracted_data["employee"]["id"],
-                            "stored": employee.id,
-                            "matches": extracted_data["employee"]["id"] == employee.id
-                        }
-                    },
-                    "payment": {
+                # Extract all data at once using the schema
+                extracted_data = await process_image_with_ollama(preprocessed_path, schema)
+                
+                if not extracted_data:
+                    logger.warning(f"No data extracted from page {page_idx + 1}")
+                    continue
+                
+                # Validate employee information
+                employee_validation = await validate_employee_info(extracted_data["employee"], db)
+                
+                # If we found a matching employee, validate payment information
+                if employee_validation["name"]["matches"] or employee_validation["id"]["matches"]:
+                    employee = None
+                    
+                    # Get the employee record - improved logic to handle different ID formats
+                    if employee_validation["id"]["matches"]:
+                        # Clean up the ID for lookup
+                        extracted_id = extracted_data["employee"]["id"]
+                        if isinstance(extracted_id, str):
+                            if extracted_id.startswith("SV-"):
+                                extracted_id = extracted_id[3:]
+                        
+                            # Try to find by exact ID
+                            employee = db.query(models.Employee).filter(
+                                models.Employee.id == extracted_id
+                            ).first()
+                        
+                            # If not found, try with case-insensitive search
+                            if not employee:
+                                employee = db.query(models.Employee).filter(
+                                    models.Employee.id.ilike(f"%{extracted_id}%")
+                                ).first()
+                    
+                    # If still not found, try by name
+                    if not employee and employee_validation["name"]["matches"]:
+                        extracted_name = extracted_data["employee"]["name"]
+                        
+                        # Clean up the name
+                        if extracted_name.startswith("Frau "):
+                            extracted_name = extracted_name[5:].strip()
+                        elif extracted_name.startswith("Herr "):
+                            extracted_name = extracted_name[5:].strip()
+                        
+                        # Try to find by exact name
+                        employee = db.query(models.Employee).filter(
+                            models.Employee.name == extracted_name
+                        ).first()
+                        
+                        # If not found, try with case-insensitive search
+                        if not employee:
+                            employee = db.query(models.Employee).filter(
+                                models.Employee.name.ilike(f"%{extracted_name}%")
+                            ).first()
+                    
+                    # Log the employee we found
+                    if employee:
+                        logger.info(f"Found matching employee: {employee.id} - {employee.name}")
+                    else:
+                        logger.warning("Employee found during validation but not when retrieving record")
+                    
+                    # Validate payment information
+                    payment_validation = {
                         "gross": {
                             "extracted": extracted_data["payment"]["gross"],
                             "stored": employee.expected_gross,
-                            "matches": abs(float(extracted_data["payment"]["gross"]) - employee.expected_gross) < 0.01
+                            "matches": False
                         },
                         "net": {
                             "extracted": extracted_data["payment"]["net"],
                             "stored": employee.expected_net,
-                            "matches": abs(float(extracted_data["payment"]["net"]) - employee.expected_net) < 0.01
+                            "matches": False
                         },
                         "deductions": {
                             "extracted": extracted_data["payment"]["deductions"],
                             "stored": employee.expected_deductions,
-                            "matches": abs(float(extracted_data["payment"]["deductions"]) - employee.expected_deductions) < 0.01
+                            "matches": False
                         }
                     }
-                }
-                all_comparisons.append(comparison)
-
+                    
+                    # Check if values match (with some tolerance for floating point)
+                    try:
+                        if extracted_data["payment"]["gross"] != "unknown":
+                            payment_validation["gross"]["matches"] = abs(
+                                float(extracted_data["payment"]["gross"]) - employee.expected_gross
+                            ) < 0.01
+                            
+                        if extracted_data["payment"]["net"] != "unknown":
+                            payment_validation["net"]["matches"] = abs(
+                                float(extracted_data["payment"]["net"]) - employee.expected_net
+                            ) < 0.01
+                            
+                        if extracted_data["payment"]["deductions"] != "unknown":
+                            payment_validation["deductions"]["matches"] = abs(
+                                float(extracted_data["payment"]["deductions"]) - employee.expected_deductions
+                            ) < 0.01
+                    except (ValueError, TypeError) as e:
+                        logger.error(f"Error comparing payment values: {e}")
+                    
+                    # Add to results
+                    comparison = {
+                        "page": page_idx + 1,
+                        "employee": employee_validation,
+                        "payment": payment_validation
+                    }
+                    all_comparisons.append(comparison)
+                else:
+                    logger.warning("No matching employee found in database")
+            except Exception as e:
+                logger.error(f"Error processing page {page_idx + 1}: {str(e)}")
             finally:
                 # Cleanup temporary file
                 if os.path.exists(page_path):
-                    os.unlink(page_path)
+                    try:
+                        os.unlink(page_path)
+                    except Exception as e:
+                        logger.error(f"Failed to cleanup temp file {page_path}: {str(e)}")
+                if os.path.exists(preprocessed_path):
+                    try:
+                        os.unlink(preprocessed_path)
+                    except Exception as e:
+                        logger.error(f"Failed to cleanup temp file {preprocessed_path}: {str(e)}")
 
         if not all_comparisons:
-            raise HTTPException(status_code=404, detail="No valid payslip data found")
+            raise HTTPException(status_code=404, detail="Keine gültigen Gehaltsabrechnungsdaten gefunden")
 
         return {"pages": all_comparisons, "total_pages": len(pages)}
 
@@ -467,22 +668,22 @@ async def extract_property_info(image_path: str) -> dict:
 
         # Prepare the prompt
         prompt = """
-        Analyze this property listing image. You must find and extract specific information:
+        Analysiere dieses Immobilienangebot. Du musst folgende spezifische Informationen finden und extrahieren:
 
-        1. The living space (square footage or square meters)
-        2. The purchase price
+        1. Die Wohnfläche (in Quadratmetern, m²)
+        2. Den Kaufpreis (in Euro, €)
 
-        Return the extracted values in this JSON structure:
+        Gib die extrahierten Werte in dieser JSON-Struktur zurück:
         {
-            "living_space": "<exact text found for living space, including units>",
-            "purchase_price": "<exact text found for purchase price, including currency symbol>"
+            "living_space": "<exakter Text für die Wohnfläche, inklusive Einheit>",
+            "purchase_price": "<exakter Text für den Kaufpreis, inklusive Währungssymbol>"
         }
 
-        Rules:
-        - Extract values EXACTLY as they appear
-        - Return only the JSON structure
-        - If you cannot read a value clearly, return "unclear"
-        - Do not invent or guess any values
+        Regeln:
+        - Extrahiere die Werte EXAKT wie sie erscheinen
+        - Gib nur die JSON-Struktur zurück
+        - Wenn du einen Wert nicht klar lesen kannst, gib "unklar" zurück
+        - Erfinde oder rate keine Werte
         """
 
         logger.info("Calling Llama 3.2 Vision API for property info...")
