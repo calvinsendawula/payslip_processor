@@ -713,4 +713,22 @@ async def extract_property_info(image_path: str) -> dict:
 
     except Exception as e:
         logger.error(f"Error extracting property info: {e}")
-        return None 
+        return None
+
+# Update the path to the settings file
+def load_ai_settings():
+    try:
+        # Change from 'aisettings' to 'aisettings.json'
+        with open('aisettings.json', 'r') as f:
+            return json.load(f)
+    except Exception as e:
+        logger.error(f"Error loading AI settings: {str(e)}")
+        return {
+            "model": "llama3.2-vision",
+            "temperature": 0.1,
+            "max_tokens": 1000,
+            "prompts": {
+                "payslip": {"text": "Default payslip prompt"},
+                "property": {"text": "Default property prompt"}
+            }
+        } 
