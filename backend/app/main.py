@@ -415,4 +415,101 @@ async def process_payslip(
                 try:
                     os.unlink(page_path)
                 except Exception as e:
-                    logger.error(f"Failed to cleanup temp file {page_path}: {str(e)}") 
+                    logger.error(f"Failed to cleanup temp file {page_path}: {str(e)}")
+
+@app.post("/api/process-property")
+async def process_property(
+    file: UploadFile = File(...)
+):
+    try:
+        logger.info(f"Processing property listing: {file.filename} ({file.content_type})")
+        
+        # Read file content
+        content = await file.read()
+        temp_path = f"temp_{file.filename}"
+        
+        try:
+            # Save the file temporarily
+            with open(temp_path, "wb") as f:
+                f.write(content)
+            
+            # Preprocess the image
+            preprocessed_path = await preprocess_image(temp_path)
+            
+            # Extract property information using Ollama
+            property_data = await extract_property_info(preprocessed_path)
+            
+            if not property_data:
+                raise HTTPException(status_code=404, detail="No property data found")
+                
+            return property_data
+            
+        finally:
+            # Clean up temporary files
+            for path in [temp_path, preprocessed_path]:
+                if os.path.exists(path):
+                    try:
+                        os.unlink(path)
+                    except Exception as e:
+                        logger.error(f"Failed to cleanup temp file {path}: {str(e)}")
+                        
+    except Exception as e:
+        logger.error(f"Unexpected error in process_property: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+async def extract_property_info(image_path: str) -> dict:
+    """Extract property information from an image"""
+    try:
+        # Convert image to base64
+        with open(image_path, "rb") as image_file:
+            import base64
+            image_data = base64.b64encode(image_file.read()).decode()
+
+        # Prepare the prompt
+        prompt = """
+        Analyze this property listing image. You must find and extract specific information:
+
+        1. The living space (square footage or square meters)
+        2. The purchase price
+
+        Return the extracted values in this JSON structure:
+        {
+            "living_space": "<exact text found for living space, including units>",
+            "purchase_price": "<exact text found for purchase price, including currency symbol>"
+        }
+
+        Rules:
+        - Extract values EXACTLY as they appear
+        - Return only the JSON structure
+        - If you cannot read a value clearly, return "unclear"
+        - Do not invent or guess any values
+        """
+
+        logger.info("Calling Llama 3.2 Vision API for property info...")
+        response = requests.post('http://localhost:11434/api/generate',
+            json={
+                'model': 'llama3.2-vision',
+                'prompt': prompt,
+                'images': [image_data],
+                'stream': False,
+                'temperature': 0.1
+            })
+        
+        if not response.ok:
+            logger.error(f"Ollama API error: {response.status_code} - {response.text}")
+            return None
+
+        result = response.json()
+        logger.info(f"Property info response: {result['response']}")
+        
+        json_match = re.search(r'\{.*\}', result['response'], re.DOTALL)
+        if not json_match:
+            logger.error("No JSON found in property info response")
+            return None
+            
+        property_data = json.loads(json_match.group())
+        return property_data
+
+    except Exception as e:
+        logger.error(f"Error extracting property info: {e}")
+        return None 

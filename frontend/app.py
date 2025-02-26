@@ -15,8 +15,8 @@ os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 def index():
     return render_template('index.html')
 
-@app.route('/upload', methods=['POST'])
-def upload_file():
+@app.route('/upload-payslip', methods=['POST'])
+def upload_payslip():
     if 'file' not in request.files:
         return jsonify({'error': 'No file part'}), 400
     
@@ -36,6 +36,45 @@ def upload_file():
                 files = {'file': (filename, f)}
                 response = requests.post(
                     f"{app.config['BACKEND_URL']}/api/process-payslip", 
+                    files=files
+                )
+            
+            # Clean up the temporary file
+            os.remove(filepath)
+            
+            if response.status_code == 200:
+                return jsonify(response.json())
+            else:
+                return jsonify({'error': response.json().get('detail', 'Backend processing failed')}), response.status_code
+                
+        except Exception as e:
+            return jsonify({'error': str(e)}), 500
+        finally:
+            # Make sure file is removed even if there's an error
+            if os.path.exists(filepath):
+                os.remove(filepath)
+
+@app.route('/upload-property', methods=['POST'])
+def upload_property():
+    if 'file' not in request.files:
+        return jsonify({'error': 'No file part'}), 400
+    
+    file = request.files['file']
+    if file.filename == '':
+        return jsonify({'error': 'No selected file'}), 400
+    
+    if file:
+        # Save file temporarily
+        filename = secure_filename(file.filename)
+        filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+        file.save(filepath)
+        
+        # Send to backend
+        try:
+            with open(filepath, 'rb') as f:
+                files = {'file': (filename, f)}
+                response = requests.post(
+                    f"{app.config['BACKEND_URL']}/api/process-property", 
                     files=files
                 )
             

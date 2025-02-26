@@ -1,86 +1,80 @@
 document.addEventListener('DOMContentLoaded', function() {
-    const dropzone = document.getElementById('dropzone');
-    const fileInput = document.getElementById('file-input');
-    const uploadText = document.getElementById('upload-text');
-    const loadingContainer = document.getElementById('loading');
-    const resultsContainer = document.getElementById('results');
-    const employeeInfo = document.getElementById('employee-info');
-    const paymentInfo = document.getElementById('payment-info');
-    const pageIndicator = document.getElementById('page-indicator');
-    const pagination = document.getElementById('pagination');
-    const prevBtn = document.getElementById('prev-btn');
-    const nextBtn = document.getElementById('next-btn');
+    // Tab switching
+    const navItems = document.querySelectorAll('.nav-item');
+    const tabContents = document.querySelectorAll('.tab-content');
     
-    let currentResults = null;
-    let currentPage = 0;
-    
-    // Handle file selection via click
-    dropzone.addEventListener('click', function() {
-        fileInput.click();
+    navItems.forEach(item => {
+        item.addEventListener('click', function() {
+            // Remove active class from all nav items
+            navItems.forEach(nav => nav.classList.remove('active'));
+            // Add active class to clicked nav item
+            this.classList.add('active');
+            
+            // Hide all tab contents
+            tabContents.forEach(tab => tab.classList.remove('active'));
+            // Show the corresponding tab content
+            const tabId = this.getAttribute('data-tab');
+            document.getElementById(`${tabId}-tab`).classList.add('active');
+        });
     });
     
-    fileInput.addEventListener('change', function() {
-        if (this.files.length > 0) {
-            handleFile(this.files[0]);
-        }
-    });
+    // Payslip Upload Functionality
+    const payslipDropArea = document.getElementById('payslip-drop-area');
+    const payslipFileInput = document.getElementById('payslip-file-input');
+    const payslipUploadBtn = document.getElementById('payslip-upload-btn');
+    const payslipResults = document.getElementById('payslip-results');
+    const payslipLoading = document.getElementById('payslip-loading');
+    const payslipContent = document.getElementById('payslip-content');
     
-    // Handle drag and drop
-    dropzone.addEventListener('dragover', function(e) {
+    // Setup drag and drop for payslips
+    payslipDropArea.addEventListener('click', () => payslipFileInput.click());
+    
+    payslipDropArea.addEventListener('dragover', (e) => {
         e.preventDefault();
-        dropzone.classList.add('dragover');
-        uploadText.textContent = 'Drop the payslip here...';
+        payslipDropArea.style.borderColor = '#1976d2';
     });
     
-    dropzone.addEventListener('dragleave', function() {
-        dropzone.classList.remove('dragover');
-        uploadText.textContent = 'Drag and drop your payslip';
+    payslipDropArea.addEventListener('dragleave', () => {
+        payslipDropArea.style.borderColor = '#ccc';
     });
     
-    dropzone.addEventListener('drop', function(e) {
+    payslipDropArea.addEventListener('drop', (e) => {
         e.preventDefault();
-        dropzone.classList.remove('dragover');
-        uploadText.textContent = 'Drag and drop your payslip';
+        payslipDropArea.style.borderColor = '#ccc';
         
-        if (e.dataTransfer.files.length > 0) {
-            handleFile(e.dataTransfer.files[0]);
+        if (e.dataTransfer.files.length) {
+            payslipFileInput.files = e.dataTransfer.files;
+            updatePayslipFileName();
         }
     });
     
-    // Handle pagination
-    prevBtn.addEventListener('click', function() {
-        if (currentPage > 0) {
-            currentPage--;
-            displayResults();
-        }
-    });
+    payslipFileInput.addEventListener('change', updatePayslipFileName);
     
-    nextBtn.addEventListener('click', function() {
-        if (currentResults && currentPage < currentResults.pages.length - 1) {
-            currentPage++;
-            displayResults();
+    function updatePayslipFileName() {
+        if (payslipFileInput.files.length) {
+            const fileName = payslipFileInput.files[0].name;
+            payslipDropArea.querySelector('p').textContent = `Selected file: ${fileName}`;
         }
-    });
+    }
     
-    function handleFile(file) {
-        // Check file type
-        const validTypes = ['application/pdf', 'image/jpeg', 'image/png', 'image/jpg'];
-        if (!validTypes.includes(file.type)) {
-            alert('Please upload a PDF or image file (JPG, PNG)');
+    // Handle payslip upload
+    payslipUploadBtn.addEventListener('click', () => {
+        if (!payslipFileInput.files.length) {
+            alert('Please select a file first');
             return;
         }
         
-        // Show loading
-        dropzone.style.display = 'none';
-        loadingContainer.style.display = 'flex';
-        resultsContainer.style.display = 'none';
-        
-        // Create form data
+        const file = payslipFileInput.files[0];
         const formData = new FormData();
         formData.append('file', file);
         
-        // Send to backend via our Flask endpoint
-        fetch('/upload', {
+        // Show loading state
+        payslipResults.style.display = 'block';
+        payslipLoading.style.display = 'block';
+        payslipContent.style.display = 'none';
+        
+        // Send to backend
+        fetch('/upload-payslip', {
             method: 'POST',
             body: formData
         })
@@ -93,91 +87,183 @@ document.addEventListener('DOMContentLoaded', function() {
             return response.json();
         })
         .then(data => {
-            currentResults = data;
-            currentPage = 0;
-            displayResults();
+            // Hide loading, show results
+            payslipLoading.style.display = 'none';
+            payslipContent.style.display = 'block';
+            
+            // Get the first page data
+            const pageData = data.pages[0];
+            
+            // Update employee name
+            document.getElementById('employee-name').textContent = pageData.employee.name.extracted;
+            const nameMatch = document.getElementById('employee-name-match');
+            const nameExpected = document.getElementById('employee-name-expected');
+            
+            if (pageData.employee.name.matches) {
+                nameMatch.innerHTML = '<span class="material-icons">check_circle</span>';
+                nameMatch.className = 'detail-match match-success';
+                nameExpected.className = 'detail-expected';
+                nameExpected.textContent = '';
+            } else {
+                nameMatch.innerHTML = '<span class="material-icons">error</span>';
+                nameMatch.className = 'detail-match match-error';
+                nameExpected.className = 'detail-expected show';
+                nameExpected.textContent = `(Expected: ${pageData.employee.name.stored})`;
+            }
+            
+            // Update payment information
+            document.getElementById('payment-gross').textContent = `$${pageData.payment.gross.extracted}`;
+            const grossMatch = document.getElementById('payment-gross-match');
+            const grossExpected = document.getElementById('payment-gross-expected');
+            
+            if (pageData.payment.gross.matches) {
+                grossMatch.innerHTML = '<span class="material-icons">check_circle</span>';
+                grossMatch.className = 'detail-match match-success';
+                grossExpected.className = 'detail-expected';
+                grossExpected.textContent = '';
+            } else {
+                grossMatch.innerHTML = '<span class="material-icons">error</span>';
+                grossMatch.className = 'detail-match match-error';
+                grossExpected.className = 'detail-expected show';
+                grossExpected.textContent = `(Expected: $${pageData.payment.gross.stored})`;
+            }
+            
+            document.getElementById('payment-net').textContent = `$${pageData.payment.net.extracted}`;
+            const netMatch = document.getElementById('payment-net-match');
+            const netExpected = document.getElementById('payment-net-expected');
+            
+            if (pageData.payment.net.matches) {
+                netMatch.innerHTML = '<span class="material-icons">check_circle</span>';
+                netMatch.className = 'detail-match match-success';
+                netExpected.className = 'detail-expected';
+                netExpected.textContent = '';
+            } else {
+                netMatch.innerHTML = '<span class="material-icons">error</span>';
+                netMatch.className = 'detail-match match-error';
+                netExpected.className = 'detail-expected show';
+                netExpected.textContent = `(Expected: $${pageData.payment.net.stored})`;
+            }
+            
+            // Update overall status
+            const statusElement = document.getElementById('payslip-status');
+            const allMatch = pageData.employee.name.matches && 
+                            pageData.payment.gross.matches && 
+                            pageData.payment.net.matches;
+            
+            if (allMatch) {
+                statusElement.innerHTML = '<span class="material-icons">check_circle</span><span>Payslip validated successfully</span>';
+                statusElement.className = 'summary-item success';
+            } else {
+                statusElement.innerHTML = '<span class="material-icons">error</span><span>Discrepancies detected</span>';
+                statusElement.className = 'summary-item error';
+            }
         })
         .catch(error => {
-            alert(error.message);
-            // Hide loading, show upload again
-            loadingContainer.style.display = 'none';
-            dropzone.style.display = 'block';
+            payslipLoading.style.display = 'none';
+            payslipContent.style.display = 'block';
+            
+            // Show error message
+            document.getElementById('payslip-status').innerHTML = 
+                `<span class="material-icons">error</span><span>${error.message}</span>`;
+            document.getElementById('payslip-status').className = 'summary-item error';
+            
+            // Clear other fields
+            document.getElementById('employee-name').textContent = '';
+            document.getElementById('employee-name-match').innerHTML = '';
+            document.getElementById('employee-name-expected').textContent = '';
+            document.getElementById('payment-gross').textContent = '';
+            document.getElementById('payment-gross-match').innerHTML = '';
+            document.getElementById('payment-gross-expected').textContent = '';
+            document.getElementById('payment-net').textContent = '';
+            document.getElementById('payment-net-match').innerHTML = '';
+            document.getElementById('payment-net-expected').textContent = '';
         });
+    });
+    
+    // Property Upload Functionality
+    const propertyDropArea = document.getElementById('property-drop-area');
+    const propertyFileInput = document.getElementById('property-file-input');
+    const propertyUploadBtn = document.getElementById('property-upload-btn');
+    const propertyResults = document.getElementById('property-results');
+    const propertyLoading = document.getElementById('property-loading');
+    const propertyContent = document.getElementById('property-content');
+    
+    // Setup drag and drop for property listings
+    propertyDropArea.addEventListener('click', () => propertyFileInput.click());
+    
+    propertyDropArea.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        propertyDropArea.style.borderColor = '#1976d2';
+    });
+    
+    propertyDropArea.addEventListener('dragleave', () => {
+        propertyDropArea.style.borderColor = '#ccc';
+    });
+    
+    propertyDropArea.addEventListener('drop', (e) => {
+        e.preventDefault();
+        propertyDropArea.style.borderColor = '#ccc';
+        
+        if (e.dataTransfer.files.length) {
+            propertyFileInput.files = e.dataTransfer.files;
+            updatePropertyFileName();
+        }
+    });
+    
+    propertyFileInput.addEventListener('change', updatePropertyFileName);
+    
+    function updatePropertyFileName() {
+        if (propertyFileInput.files.length) {
+            const fileName = propertyFileInput.files[0].name;
+            propertyDropArea.querySelector('p').textContent = `Selected file: ${fileName}`;
+        }
     }
     
-    function displayResults() {
-        if (!currentResults) return;
-        
-        // Hide loading, show results
-        loadingContainer.style.display = 'none';
-        resultsContainer.style.display = 'block';
-        
-        const pageData = currentResults.pages[currentPage];
-        const totalPages = currentResults.total_pages;
-        
-        // Update page indicator if multiple pages
-        if (totalPages > 1) {
-            pageIndicator.textContent = `- Page ${pageData.page} of ${totalPages}`;
-            pagination.style.display = 'flex';
-            prevBtn.disabled = currentPage === 0;
-            nextBtn.disabled = currentPage === currentResults.pages.length - 1;
-        } else {
-            pageIndicator.textContent = '';
-            pagination.style.display = 'none';
+    // Handle property upload
+    propertyUploadBtn.addEventListener('click', () => {
+        if (!propertyFileInput.files.length) {
+            alert('Please select a file first');
+            return;
         }
         
-        // Render employee information
-        employeeInfo.innerHTML = '';
-        Object.entries(pageData.employee).forEach(([key, value]) => {
-            employeeInfo.appendChild(createDataItem(key, value));
+        const file = propertyFileInput.files[0];
+        const formData = new FormData();
+        formData.append('file', file);
+        
+        // Show loading state
+        propertyResults.style.display = 'block';
+        propertyLoading.style.display = 'block';
+        propertyContent.style.display = 'none';
+        
+        // Send to backend
+        fetch('/upload-property', {
+            method: 'POST',
+            body: formData
+        })
+        .then(response => {
+            if (!response.ok) {
+                return response.json().then(data => {
+                    throw new Error(data.error || 'Failed to process property listing');
+                });
+            }
+            return response.json();
+        })
+        .then(data => {
+            // Hide loading, show results
+            propertyLoading.style.display = 'none';
+            propertyContent.style.display = 'block';
+            
+            // Update property information
+            document.getElementById('property-space').textContent = data.living_space;
+            document.getElementById('property-price').textContent = data.purchase_price;
+        })
+        .catch(error => {
+            propertyLoading.style.display = 'none';
+            propertyContent.style.display = 'block';
+            
+            // Show error message in property space and price fields
+            document.getElementById('property-space').textContent = 'Error: ' + error.message;
+            document.getElementById('property-price').textContent = '';
         });
-        
-        // Render payment information
-        paymentInfo.innerHTML = '';
-        Object.entries(pageData.payment).forEach(([key, value]) => {
-            paymentInfo.appendChild(createDataItem(key, value));
-        });
-    }
-    
-    function createDataItem(key, value) {
-        const item = document.createElement('div');
-        item.className = 'data-item';
-        
-        const title = document.createElement('div');
-        title.className = 'data-item-title';
-        title.textContent = key.charAt(0).toUpperCase() + key.slice(1);
-        
-        const content = document.createElement('div');
-        content.className = 'data-item-content';
-        
-        const extracted = document.createElement('div');
-        extracted.textContent = `Extracted: ${value.extracted}`;
-        
-        content.appendChild(extracted);
-        
-        if (value.stored !== undefined) {
-            const stored = document.createElement('div');
-            stored.textContent = `Stored: ${value.stored}`;
-            content.appendChild(stored);
-            
-            const chip = document.createElement('div');
-            chip.className = `chip ${value.matches ? 'success' : 'error'}`;
-            
-            const icon = document.createElement('span');
-            icon.className = 'material-icons';
-            icon.textContent = value.matches ? 'check_circle' : 'cancel';
-            
-            const label = document.createElement('span');
-            label.textContent = value.matches ? 'Match' : 'Mismatch';
-            
-            chip.appendChild(icon);
-            chip.appendChild(label);
-            content.appendChild(chip);
-        }
-        
-        item.appendChild(title);
-        item.appendChild(content);
-        
-        return item;
-    }
+    });
 }); 

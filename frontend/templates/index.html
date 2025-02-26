@@ -3,58 +3,142 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Payslip Processor</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}">
-    <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,400,500,700&display=swap">
-    <link rel="stylesheet" href="https://fonts.googleapis.com/icon?family=Material+Icons">
+    <title>Document Processing Dashboard</title>
+    <link rel="stylesheet" href="/static/css/styles.css">
+    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
 </head>
 <body>
-    <div class="container">
-        <div class="paper">
-            <h1 class="title">Payslip Processor</h1>
-            
-            <div class="upload-container" id="dropzone">
-                <div class="upload-icon">
-                    <span class="material-icons">cloud_upload</span>
-                </div>
-                <h3 id="upload-text">Drag and drop your payslip</h3>
-                <p class="upload-subtext">or click to select file</p>
-                <p class="upload-formats">Supports PDF, PNG, JPG files</p>
-                <input type="file" id="file-input" accept=".pdf,.png,.jpg,.jpeg" style="display: none;">
+    <div class="dashboard">
+        <div class="sidebar">
+            <div class="sidebar-header">
+                <h2>Document Processor</h2>
             </div>
-            
-            <div id="loading" class="loading-container" style="display: none;">
-                <div class="spinner"></div>
-                <h3>Processing your payslip...</h3>
-            </div>
-            
-            <div id="results" class="results-container" style="display: none;">
-                <h2 class="results-title">Analysis Results <span id="page-indicator"></span></h2>
-                
-                <div id="pagination" class="pagination" style="display: none;">
-                    <button id="prev-btn" class="btn" disabled>
-                        <span class="material-icons">navigate_before</span> Previous
-                    </button>
-                    <button id="next-btn" class="btn">
-                        Next <span class="material-icons">navigate_next</span>
-                    </button>
+            <nav class="sidebar-nav">
+                <ul>
+                    <li class="nav-item active" data-tab="payslips">
+                        <span class="material-icons">description</span>
+                        <span>Payslips</span>
+                    </li>
+                    <li class="nav-item" data-tab="properties">
+                        <span class="material-icons">home</span>
+                        <span>Property Listings</span>
+                    </li>
+                </ul>
+            </nav>
+        </div>
+        
+        <div class="main-content">
+            <div class="tab-content active" id="payslips-tab">
+                <div class="content-header">
+                    <h1>Payslip Processor</h1>
+                    <p>Upload a payslip to extract and validate information</p>
                 </div>
                 
-                <div class="sections-container">
-                    <div class="section">
-                        <h3 class="section-title">Employee Information</h3>
-                        <div id="employee-info" class="section-content"></div>
+                <div class="upload-container" id="payslip-upload">
+                    <div class="upload-area" id="payslip-drop-area">
+                        <span class="material-icons">cloud_upload</span>
+                        <p>Drag & drop a payslip file here or click to browse</p>
+                        <input type="file" id="payslip-file-input" accept=".pdf,.png,.jpg,.jpeg" hidden>
+                    </div>
+                    <button id="payslip-upload-btn" class="upload-btn">Upload Payslip</button>
+                </div>
+                
+                <div class="results-container" id="payslip-results">
+                    <div class="loading-indicator" id="payslip-loading">
+                        <div class="spinner"></div>
+                        <p>Processing payslip...</p>
                     </div>
                     
-                    <div class="section">
-                        <h3 class="section-title">Payment Information</h3>
-                        <div id="payment-info" class="section-content"></div>
+                    <div class="results-content" id="payslip-content">
+                        <h2>Payslip Analysis</h2>
+                        <div class="results-summary">
+                            <div class="summary-item" id="payslip-status">
+                                <span class="material-icons">check_circle</span>
+                                <span>Payslip validated successfully</span>
+                            </div>
+                        </div>
+                        
+                        <div class="results-details">
+                            <div class="detail-section">
+                                <h3>Employee Information</h3>
+                                <div class="detail-item">
+                                    <span class="detail-match" id="employee-name-match">
+                                        <span class="material-icons">check_circle</span>
+                                    </span>
+                                    <span class="detail-label">Name:</span>
+                                    <span class="detail-value" id="employee-name"></span>
+                                    <span class="detail-expected" id="employee-name-expected"></span>
+                                </div>
+                            </div>
+                            
+                            <div class="detail-section">
+                                <h3>Payment Information</h3>
+                                <div class="detail-item">
+                                    <span class="detail-match" id="payment-gross-match">
+                                        <span class="material-icons">check_circle</span>
+                                    </span>
+                                    <span class="detail-label">Gross Pay:</span>
+                                    <span class="detail-value" id="payment-gross"></span>
+                                    <span class="detail-expected" id="payment-gross-expected"></span>
+                                </div>
+                                <div class="detail-item">
+                                    <span class="detail-match" id="payment-net-match">
+                                        <span class="material-icons">check_circle</span>
+                                    </span>
+                                    <span class="detail-label">Net Pay:</span>
+                                    <span class="detail-value" id="payment-net"></span>
+                                    <span class="detail-expected" id="payment-net-expected"></span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="tab-content" id="properties-tab">
+                <div class="content-header">
+                    <h1>Property Listing Processor</h1>
+                    <p>Upload a property listing to extract information</p>
+                </div>
+                
+                <div class="upload-container" id="property-upload">
+                    <div class="upload-area" id="property-drop-area">
+                        <span class="material-icons">cloud_upload</span>
+                        <p>Drag & drop a property listing file here or click to browse</p>
+                        <input type="file" id="property-file-input" accept=".pdf,.png,.jpg,.jpeg" hidden>
+                    </div>
+                    <button id="property-upload-btn" class="upload-btn">Upload Property Listing</button>
+                </div>
+                
+                <div class="results-container" id="property-results">
+                    <div class="loading-indicator" id="property-loading">
+                        <div class="spinner"></div>
+                        <p>Processing property listing...</p>
+                    </div>
+                    
+                    <div class="results-content" id="property-content">
+                        <h2>Property Listing Analysis</h2>
+                        
+                        <div class="results-details">
+                            <div class="detail-section">
+                                <h3>Property Information</h3>
+                                <div class="detail-item">
+                                    <span class="detail-label">Living Space:</span>
+                                    <span class="detail-value" id="property-space"></span>
+                                </div>
+                                <div class="detail-item">
+                                    <span class="detail-label">Purchase Price:</span>
+                                    <span class="detail-value" id="property-price"></span>
+                                </div>
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>
         </div>
     </div>
     
-    <script src="{{ url_for('static', filename='js/main.js') }}"></script>
+    <script src="/static/js/main.js"></script>
 </body>
 </html> 
