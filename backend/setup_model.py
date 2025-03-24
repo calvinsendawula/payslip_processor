@@ -67,34 +67,24 @@ def download_and_cache_model():
     
     logger.info(f"Using cache directory: {cache_dir}")
     
-    # Required model files to check for
-    required_files = [
-        f"models--{model_id.replace('/', '--')}/snapshots",
-        f"models--{model_id.replace('/', '--')}/blobs/model-00001-of-00005.safetensors",
-        f"models--{model_id.replace('/', '--')}/blobs/model-00002-of-00005.safetensors",
-        f"models--{model_id.replace('/', '--')}/blobs/model-00003-of-00005.safetensors",
-        f"models--{model_id.replace('/', '--')}/blobs/model-00004-of-00005.safetensors",
-        f"models--{model_id.replace('/', '--')}/blobs/model-00005-of-00005.safetensors"
-    ]
+    # Set explicit save paths for our model and processor
+    model_path = os.path.join(cache_dir, "model")
+    processor_path = os.path.join(cache_dir, "processor")
     
-    # Check if all required files exist
-    all_files_exist = True
-    for file_path in required_files:
-        full_path = os.path.join(cache_dir, file_path)
-        if not os.path.exists(full_path):
-            logger.warning(f"Missing required file: {full_path}")
-            all_files_exist = False
-            break
+    # Check if our explicit model path exists and has files in it
+    model_files_exist = os.path.exists(model_path) and len(os.listdir(model_path)) > 0
+    processor_files_exist = os.path.exists(processor_path) and len(os.listdir(processor_path)) > 0
     
-    if all_files_exist:
-        logger.info("All required model files found in cache.")
-        # Create a marker file that qwen_processor.py can check for
-        with open(os.path.join(cache_dir, "QWEN_MODEL_READY"), "w") as f:
-            f.write("Model is ready for use")
+    # Create a marker file to indicate setup completion
+    marker_file = os.path.join(cache_dir, "QWEN_MODEL_READY")
+    
+    # Check if files exist and marker is present
+    if model_files_exist and processor_files_exist and os.path.exists(marker_file):
+        logger.info("Model and processor files found in cache directory.")
         return True
     
-    # If any files are missing, do a full download
-    logger.info("Some required model files are missing. Starting full download...")
+    # If files don't exist, do a full download
+    logger.info("Model or processor files are missing. Starting download...")
     
     try:
         # Download and cache the processor
@@ -107,7 +97,6 @@ def download_and_cache_model():
         
         # Save processor explicitly to disk
         logger.info("Saving processor to disk...")
-        processor_path = os.path.join(cache_dir, "processor")
         os.makedirs(processor_path, exist_ok=True)
         processor.save_pretrained(processor_path)
         
@@ -124,31 +113,29 @@ def download_and_cache_model():
         
         # Save model explicitly to disk
         logger.info("Saving model to disk...")
-        model_path = os.path.join(cache_dir, "model")
         os.makedirs(model_path, exist_ok=True)
         model.save_pretrained(model_path)
         
-        # Create a marker file that qwen_processor.py can check for
-        with open(os.path.join(cache_dir, "QWEN_MODEL_READY"), "w") as f:
-            f.write("Model is ready for use")
+        # Verify our saved model and processor paths
+        model_files_exist = os.path.exists(model_path) and len(os.listdir(model_path)) > 0
+        processor_files_exist = os.path.exists(processor_path) and len(os.listdir(processor_path)) > 0
         
-        # Verify all files now exist
-        all_files_exist = True
-        for file_path in required_files:
-            full_path = os.path.join(cache_dir, file_path)
-            if not os.path.exists(full_path):
-                logger.warning(f"Still missing required file after download: {full_path}")
-                all_files_exist = False
-                break
-        
-        if all_files_exist:
-            logger.info("All model files successfully downloaded and verified.")
+        if model_files_exist and processor_files_exist:
+            logger.info("Model and processor files saved successfully!")
+            
+            # Create a marker file to indicate setup completion
+            with open(marker_file, "w") as f:
+                f.write("Model is ready for use")
+            
+            logger.info(f"Models cached at: {cache_dir}")
+            logger.info(f"Model directory: {model_path}")
+            logger.info(f"Processor directory: {processor_path}")
+            
+            return True
         else:
-            logger.warning("Some model files are still missing. Please run this script again.")
+            logger.warning("Model or processor files could not be found after download")
+            return False
         
-        logger.info(f"Model cached at: {cache_dir}")
-        return all_files_exist
-    
     except Exception as e:
         logger.error(f"Error downloading and caching model: {str(e)}")
         return False
