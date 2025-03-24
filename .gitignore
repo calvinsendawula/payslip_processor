@@ -60,3 +60,15 @@ ENV/
 
 # Uploads folder (temporary files)
 uploads/
+
+# Custom files
+german_payslip_V2.pdf
+gemma.txt
+paddle_mistral_report_V2.md
+paddle_mistral_report.md
+paddle_model_comparisons.txt
+paddle_qwen.md
+paddle_V3_Qwen_OCR.md
+paddleOCR.txt
+pdf_extraction_payslip.py
+report.md
