@@ -5,7 +5,7 @@ A full-stack application that processes payslips using AI vision to extract and 
 
 ## Overview
 
-This application demonstrates how AI vision models can be used to extract structured information from documents. It uses Llama 3.2 Vision to analyze German payslips and property listings, extracting key information and validating it against expected values.
+This application demonstrates how AI vision models can be used to extract structured information from documents. It uses Qwen2.5-VL-7B to analyze German payslips and property listings, extracting key information and validating it against expected values.
 
 ## Features
 
@@ -18,7 +18,6 @@ This application demonstrates how AI vision models can be used to extract struct
 ## Requirements
 
 - Python 3.11.5
-- Ollama (for AI vision processing)
 - poppler-utils (for PDF processing)
 - GPU with 8GB+ VRAM recommended (can work with less but will be slower)
   - Windows: 
@@ -31,89 +30,75 @@ This application demonstrates how AI vision models can be used to extract struct
 
 ## Setup Instructions
 
-### 1. Install Ollama
+1. Install dependencies:
+   ```
+   pip install -r requirements.txt
+   ```
 
-1. Visit [Ollama's website](https://ollama.ai/) and download the appropriate version for your OS
-2. Install Ollama following their instructions
-3. Start the Llama model:
+2. **ONE-TIME MODEL SETUP** - Download and cache the model (about 7GB):
+   ```
+   cd backend
+   python setup_model.py
+   ```
+   
+   > **IMPORTANT**: This step downloads the Qwen2.5-VL-7B model files (approximately 7GB) to a local `model_cache` folder in your project. You only need to run this **ONCE**, and the model will be saved permanently for future use.
+   >
+   > The download process may take 15-30 minutes depending on your internet connection. After completion, the application will use these cached files without redownloading.
 
-```bash
-ollama run llama3.2-vision
-```
+3. Install PDF processing tools:
 
-This will download and run the model if it's not already present (download size should be around 6GB for the 11B parameter model). Keep this terminal window open as it needs to stay running.
+   **For Windows**:
+   - Download and install Poppler from https://github.com/oschwartz10612/poppler-windows/releases/
+   - Add the `bin` directory to your PATH
+   
+   **For Linux**:
+   ```
+   apt-get install -y poppler-utils
+   ```
+  
+## Running the Application
 
-### 2. Install Dependencies
+1. Seed the database first:
+   ```
+   cd backend
+   python -m app.seed_db
+   ```
 
-#### Backend (FastAPI)
+2. Start the backend:
+   ```
+   cd backend
+   uvicorn app.main:app --reload
+   ```
 
-```bash
-cd backend
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-pip install -r requirements.txt
-```
+3. In a separate terminal, start the frontend:
+   ```
+   cd frontend
+   python app.py
+   ```
 
-#### Frontend (Flask)
+4. Open the application in your browser:
+   http://localhost:5173
 
-```bash
-cd frontend
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-pip install -r requirements.txt
-```
+## Using GPU Acceleration
 
-### 3. Install PDF Processing Tools
+This application supports GPU acceleration if you have an NVIDIA GPU. To enable it:
 
-#### Windows
-Download and install poppler from: https://github.com/oschwartz10612/poppler-windows/releases/
-Add the bin directory to your PATH.
+1. Install the CUDA-enabled version of PyTorch:
+   ```
+   pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
+   ```
 
-#### macOS
-```bash
-brew install poppler
-```
+2. Run the model setup script as described above.
 
-#### Linux (Ubuntu/Debian)
-```bash
-sudo apt-get install -y poppler-utils
-```
-
-### 4. Seed the Database
-
-```bash
-cd backend
-python -m app.seed_db
-```
-
-This will create a SQLite database with sample employee records that match the provided sample payslips.
-
-### 5. Start the Backend
-
-```bash
-cd backend
-uvicorn app.main:app --reload
-```
-
-### 6. Start the Frontend
-
-In a new terminal:
-
-```bash
-cd frontend
-python app.py
-```
-
-### 7. Access the Application
-
-Open your browser and navigate to: http://localhost:5173
+3. Start the application normally - it will automatically detect and use your GPU.
 
 ## Using the Application
 
 1. Select the "Gehaltsabrechnung" tab for payslip processing or "Immobilienangebot" tab for property listings
 2. Drag and drop a PDF or image file, or click to select a file
 3. Click "Hochladen und Analysieren" to process the file
-4. View the extracted information and validation results
+4. For payslips, enter an employee ID to validate the extracted information
+5. View the extracted information and validation results
 
 ### Sample Files
 
@@ -138,24 +123,28 @@ This demonstrates how the system can detect potential issues in payroll processi
 **Important**: The system is configured specifically for these sample payslips. To use it with different payslips, you'll need to:
 1. Modify the seed data in `backend/app/seed_db.py` to match your expected values
 2. Adjust the extraction logic in `backend/app/main.py` to match your payslip format
-3. Update the prompt template in `aisettings` to extract the relevant information from your payslip format
+3. Update the prompt templates in `backend/app/qwen_processor.py` to extract the relevant information from your payslip format
 
 ## System Architecture
 
-The system uses Ollama's Llama 3.2 Vision 11B parameters model for processing payslip images. The model runs locally through Ollama's API, which the backend communicates with to extract payment information from uploaded documents.
+The system uses the Qwen2.5-VL-7B vision-language model for processing payslip and property listing images. The model runs locally and uses a sliding window approach to handle large documents efficiently.
 
 - **Frontend**: Flask web application that handles file uploads and displays results
-- **Backend**: FastAPI application that processes files and communicates with the AI model
+- **Backend**: FastAPI application that processes files and communicates with the vision model
 - **Database**: SQLite database that stores expected values for validation
-- **AI Model**: Llama 3.2 Vision running locally through Ollama
+- **AI Model**: Qwen2.5-VL-7B vision-language model running locally 
 
 ## API Documentation
 
 The backend provides the following endpoints:
 
-- `POST /api/process-payslip`: Process a payslip file and return extracted information
+- `POST /api/extract-payslip`: Process a payslip file and return extracted information
   - Accepts: PDF or image files (multipart/form-data)
-  - Returns: JSON with comparison results
+  - Returns: JSON with extracted information
+
+- `POST /api/validate-payslip-by-id`: Validate extracted information against a specific employee ID
+  - Accepts: JSON with employee ID and extracted data
+  - Returns: JSON with validation results
 
 - `POST /api/process-property`: Process a property listing and return extracted information
   - Accepts: PDF or image files (multipart/form-data)
@@ -163,6 +152,6 @@ The backend provides the following endpoints:
 
 ## Troubleshooting
 
-- **Model Loading Issues**: If Ollama fails to load the model, ensure you have sufficient RAM and VRAM
+- **Model Loading Issues**: If the model fails to load, ensure you have sufficient RAM and VRAM
 - **PDF Processing Errors**: Make sure poppler-utils is correctly installed and accessible in your PATH
-- **Extraction Accuracy**: The system is optimized for the provided sample files; other formats require prompt adjustments
+- **Extraction Accuracy**: The system is optimized for the provided sample files; other formats may require prompt adjustments
