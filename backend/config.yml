@@ -1,0 +1,31 @@
+# Qwen2.5-VL-7B Sliding Window OCR Configuration
+
+# OCR Configuration
+model:
+  id: "Qwen/Qwen2.5-VL-7B-Instruct"
+  memory_limit_gb: 0  # Disable explicit memory limit and let PyTorch manage it
+  use_float32: false  # Use FP16 for better memory efficiency
+  use_cpu_offload: false  # Disable CPU offloading as it conflicts with device placement
+
+pdf:
+  dpi: 600  # Higher DPI captures more detail but requires more processing power
+
+image:
+  initial_resolution: 1500  # Starting resolution for progressive reduction
+  resolution_steps: [1500, 1200, 1000, 800, 600]  # Progressive resolution reduction steps
+  enhance_contrast: true  # Apply contrast enhancement to improve text visibility
+  use_advanced_preprocessing: true  # Apply additional preprocessing techniques
+  sharpen_factor: 2.5  # Level of sharpening to apply to the image
+  contrast_factor: 1.8  # Level of contrast enhancement
+  brightness_factor: 1.1  # Level of brightness adjustment
+
+sliding_window:
+  enabled: true  # Enable sliding window approach
+  window_count: 2  # Split image into 2 parts (top/bottom)
+  window_overlap: 0.1  # 10% overlap between windows
+
+text_generation:
+  max_new_tokens: 768  # Reduced to save memory
+  use_beam_search: false  # Disable beam search for memory efficiency
+  num_beams: 1  # Only one beam
+  auto_process_results: true  # Automatically improve results with regex fallback if model fails 
