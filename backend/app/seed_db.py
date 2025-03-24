@@ -11,42 +11,54 @@ def seed_database():
     db.query(models.Employee).delete()
     db.commit()
     
-    # Add sample employees with expected values matching the sample payslips
+    # Add sample employees with expected values
     employees = [
+        # Genuine employee that would match the actual extracted data from the payslip
         models.Employee(
-            id="0110",  # SV-Schlüssel from the payslip
-            name="Frau Musterfrau",  # Exact name from the payslip
-            expected_gross=3214.00,  # Actual Brutto from the payslip
-            expected_net=2000.00,    # Intentionally wrong net amount
-            expected_deductions=1214.00  # Adjusted for the discrepancy
+            id="EMP001",  # Made up ID for genuine employee
+            name="Erika Mustermann",  # Name that should match the extracted data
+            expected_gross=2124.00,  # Gross amount that should match extracted data
+            expected_net=1374.78,    # Net amount that should match extracted data
+            expected_deductions=749.22  # Calculated deductions
         ),
-        # Add variations of the employee data to match different AI extractions
+        # Fake employee 1
         models.Employee(
-            id="12345",  # Alternative ID format
-            name="Marion Musterfrau",  # Alternative name format
-            expected_gross=3214.00,  # Same values as they should match
-            expected_net=2000.00,    # Same intentionally wrong net amount
-            expected_deductions=1214.00  # Adjusted for the discrepancy
+            id="EMP002",
+            name="Hans Mueller",
+            expected_gross=3500.00,
+            expected_net=2200.50,
+            expected_deductions=1299.50
         ),
-        # This variation demonstrates fraud detection - intentionally wrong net amount
+        # Fake employee 2
         models.Employee(
-            id="55566",  # Another possible ID format
-            name="Frau Marion Musterfrau",  # Another name variation
-            expected_gross=3214.00,  # Correct gross amount
-            expected_net=2000.00,    # Intentionally wrong net amount
-            expected_deductions=1214.00  # Adjusted for the discrepancy
+            id="EMP003",
+            name="Michael Schmidt",
+            expected_gross=4200.00,
+            expected_net=2650.75,
+            expected_deductions=1549.25
+        ),
+        # Fake employee 3
+        models.Employee(
+            id="EMP004",
+            name="Anna Klein",
+            expected_gross=3100.00,
+            expected_net=1980.25,
+            expected_deductions=1119.75
+        ),
+        # Fake employee 4
+        models.Employee(
+            id="EMP005",
+            name="Maria Weber",
+            expected_gross=2800.00,
+            expected_net=1820.30,
+            expected_deductions=979.70
         )
     ]
     
-    # Remove duplicates based on ID
-    unique_employees = {}
-    for emp in employees:
-        unique_employees[emp.id] = emp
-    
-    db.add_all(unique_employees.values())
+    db.add_all(employees)
     db.commit()
     
-    print(f"Added {len(unique_employees)} sample employees to the database")
+    print(f"Added {len(employees)} sample employees to the database")
     db.close()
 
 if __name__ == "__main__":
