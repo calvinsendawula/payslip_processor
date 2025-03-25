@@ -1,168 +1,222 @@
-# Updated README for Payslip Processor
-# Gehaltsabrechnungs-Verarbeitung
+# Payslip Processor with Qwen2.5-VL-7B
 
-A full-stack application that processes payslips using AI vision to extract and validate payment information against stored records.
+A FastAPI application that processes German payslips using the Qwen2.5-VL-7B vision-language model.
 
-## Overview
+## ⚠️ Important Notes - Please Read First
 
-This application demonstrates how AI vision models can be used to extract structured information from documents. It uses Llama 3.2 Vision to analyze German payslips and property listings, extracting key information and validating it against expected values.
+This application is currently optimized for processing a specific payslip format (sample_payslip_v2.pdf). The vision-language model has been specifically trained with prompts tailored to this document structure.
 
-## Features
+### Key Points to Understand
+- The application is NOT a generic payslip processor
+- Each different payslip format requires specific guidance
+- Current implementation extracts:
+  - Employee name (from top section after "Herrn/Frau")
+  - Gross amount (Gesamt-Brutto from top-right corner)
+  - Net amount (Auszahlungsbetrag from bottom-right corner)
+- The model CAN process any document type but needs specific guidance for each new format
 
-- **Payslip Processing**: Extract employee information and payment details from German payslips
-- **Property Listing Analysis**: Extract living space and purchase price from German property listings
-- **Validation System**: Compare extracted values with expected values in the database
-- **Error Detection**: Highlight discrepancies between extracted and expected values
-- **Demonstration Mode**: Includes intentional discrepancies to showcase error detection capabilities
+## System Requirements
 
-## Requirements
+### Hardware Requirements
+- **GPU**: CUDA-capable NVIDIA GPU
+- **VRAM (Video RAM) Requirements:**
+  - Minimum: 8GB VRAM (non-negotiable)
+  - Recommended: 12GB VRAM or more
+  - Example compatible GPUs:
+    - NVIDIA RTX 3060 (12GB VRAM)
+    - NVIDIA RTX 3080 (10GB VRAM)
+    - NVIDIA RTX 4070 (12GB VRAM)
+    - Or any GPU with 8GB+ VRAM
+  - Note: VRAM capacity is more important than GPU processing power
 
-- Python 3.11.5
-- Ollama (for AI vision processing)
-- poppler-utils (for PDF processing)
-- GPU with 8GB+ VRAM recommended (can work with less but will be slower)
-  - Windows: 
-    1. Press Windows + R, type "dxdiag" and press Enter
-    2. Go to the "Display" tab(s)
-    3. If you have multiple displays, check all "Display" tabs - the GPU with the highest VRAM will be used
-    4. Look for "Dedicated Memory" or "Display Memory" - this is your VRAM in MB/GB
-  - Linux: Run `nvidia-smi` in terminal
-  - macOS: Apple > About This Mac > System Report > Graphics/Displays
+### Software Requirements
+- **Python Version:**
+  - Required: Python 3.10 or higher
+  - Recommended: Python 3.11.5
+- **Disk Space:** ~7GB for model files
+- **Operating System:** Windows, Linux, or macOS
+- **PDF Processing Tools:**
+  - Windows: Poppler (added to PATH)
+  - Linux: poppler-utils
+  - macOS: poppler via homebrew
 
 ## Setup Instructions
 
-### 1. Install Ollama
-
-1. Visit [Ollama's website](https://ollama.ai/) and download the appropriate version for your OS
-2. Install Ollama following their instructions
-3. Start the Llama model:
-
+### 1. Environment Setup
 ```bash
-ollama run llama3.2-vision
-```
-
-This will download and run the model if it's not already present (download size should be around 6GB for the 11B parameter model). Keep this terminal window open as it needs to stay running.
-
-### 2. Install Dependencies
-
-#### Backend (FastAPI)
-
-```bash
-cd backend
+# Create virtual environment
+# Windows
 python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
+.\venv\Scripts\activate
+
+# Linux/macOS
+python3 -m venv venv
+source venv/bin/activate
+
+# Install dependencies
 pip install -r requirements.txt
+
+# Install PyTorch with CUDA support
+pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
 ```
 
-#### Frontend (Flask)
+### 2. Install PDF Processing Tools
 
-```bash
-cd frontend
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-pip install -r requirements.txt
-```
+**For Windows:**
+1. Download Poppler from https://github.com/oschwartz10612/poppler-windows/releases/
+2. Install and add the `bin` directory to your system's PATH
+3. Verify installation by running `pdfinfo -v` in a new terminal
 
-### 3. Install PDF Processing Tools
-
-#### Windows
-Download and install poppler from: https://github.com/oschwartz10612/poppler-windows/releases/
-Add the bin directory to your PATH.
-
-#### macOS
-```bash
-brew install poppler
-```
-
-#### Linux (Ubuntu/Debian)
+**For Linux:**
 ```bash
 sudo apt-get install -y poppler-utils
 ```
 
-### 4. Seed the Database
+**For macOS:**
+```bash
+brew install poppler
+```
 
+### 3. Model Setup and Configuration
+
+```bash
+# Download and cache model files (one-time setup, ~7GB)
+cd backend
+python setup_model.py
+```
+
+> **IMPORTANT**: This downloads the Qwen2.5-VL-7B model (approximately 7GB) to a local `model_cache` folder in your project. This step must be completed once before using the application.
+>
+> The download takes 15-30 minutes depending on your internet connection. After completion, the application will use these cached files without redownloading.
+
+The application uses dynamic memory management:
+- Default: No explicit memory limit (uses up to 90% of available VRAM)
+- To restrict memory usage, modify `backend/config.yaml`:
+  ```yaml
+  model:
+    memory_limit_gb: 0  # This is currently set to 0 so the model will use whatever VRAM is available to it
+  ```
+
+### 4. Database Setup
 ```bash
 cd backend
 python -m app.seed_db
 ```
 
-This will create a SQLite database with sample employee records that match the provided sample payslips.
-
-### 5. Start the Backend
-
+### 5. Start the Application
 ```bash
+# Terminal 1 - Start backend
 cd backend
 uvicorn app.main:app --reload
-```
 
-### 6. Start the Frontend
-
-In a new terminal:
-
-```bash
+# Terminal 2 - Start frontend
 cd frontend
 python app.py
 ```
 
-### 7. Access the Application
+Access the application at http://localhost:5173
 
-Open your browser and navigate to: http://localhost:5173
+## Testing the Application
 
-## Using the Application
+### Sample Payslip Processing
+1. Use `sample_payslip_v2.pdf` for testing
+2. Expected values:
+   - Employee Name: "Erika Mustermann"
+   - Gross Amount: 2124.00
+   - Net Amount: 1374.78
 
-1. Select the "Gehaltsabrechnung" tab for payslip processing or "Immobilienangebot" tab for property listings
-2. Drag and drop a PDF or image file, or click to select a file
-3. Click "Hochladen und Analysieren" to process the file
-4. View the extracted information and validation results
+## Processing Different Payslip Formats
 
-### Sample Files
+To adapt the system for different payslip formats:
+1. Modify prompts in `backend/app/qwen_processor.py`
+2. Update:
+   - Field location descriptions
+   - Search patterns and labels
+   - Validation rules if needed
 
-The repository includes sample files in the `samples` directory:
-- `german_payslip.pdf`: A sample German payslip
-- `german_house_listing.pdf`: A sample German property listing
+## Technical Architecture
 
-## Demonstration Features
+- **Backend:** FastAPI
+- **Frontend:** HTML + CSS
+- **Model:** Qwen2.5-VL-7B vision-language model
+- **Processing:** Sliding window approach with progressive resolution
+- **Database:** SQLite with SQLAlchemy ORM
 
-### Intentional Discrepancy
+## Performance Considerations
 
-The system includes an intentional discrepancy in the database to showcase the error detection capabilities:
-
-- The sample payslip shows a net amount of 2,729.38 €
-- The database has an expected net amount of 3,214.00 € (which is actually the base salary amount)
-- When processing the payslip, the system will correctly extract 2,729.38 € but flag it as an error since it doesn't match the expected value
-
-This demonstrates how the system can detect potential issues in payroll processing, useful for identifying mistakes or fraud.
-
-## Customization
-
-**Important**: The system is configured specifically for these sample payslips. To use it with different payslips, you'll need to:
-1. Modify the seed data in `backend/app/seed_db.py` to match your expected values
-2. Adjust the extraction logic in `backend/app/main.py` to match your payslip format
-3. Update the prompt template in `aisettings` to extract the relevant information from your payslip format
-
-## System Architecture
-
-The system uses Ollama's Llama 3.2 Vision 11B parameters model for processing payslip images. The model runs locally through Ollama's API, which the backend communicates with to extract payment information from uploaded documents.
-
-- **Frontend**: Flask web application that handles file uploads and displays results
-- **Backend**: FastAPI application that processes files and communicates with the AI model
-- **Database**: SQLite database that stores expected values for validation
-- **AI Model**: Llama 3.2 Vision running locally through Ollama
-
-## API Documentation
-
-The backend provides the following endpoints:
-
-- `POST /api/process-payslip`: Process a payslip file and return extracted information
-  - Accepts: PDF or image files (multipart/form-data)
-  - Returns: JSON with comparison results
-
-- `POST /api/process-property`: Process a property listing and return extracted information
-  - Accepts: PDF or image files (multipart/form-data)
-  - Returns: JSON with extracted property details
+- First-time processing may be slower due to GPU memory allocation
+- Subsequent processing is faster
+- Performance factors:
+  - Available VRAM (more = faster processing)
+  - Memory allocation settings in config.yaml
+  - GPU acceleration is crucial for reasonable performance
 
 ## Troubleshooting
 
-- **Model Loading Issues**: If Ollama fails to load the model, ensure you have sufficient RAM and VRAM
-- **PDF Processing Errors**: Make sure poppler-utils is correctly installed and accessible in your PATH
-- **Extraction Accuracy**: The system is optimized for the provided sample files; other formats require prompt adjustments
+### Model Loading Issues
+1. Verify `setup_model.py` completed successfully
+2. Check `model_cache` directory contains model files
+3. Verify CUDA availability:
+   ```python
+   python -c "import torch; print(torch.cuda.is_available())"
+   ```
+
+### PDF Processing Errors
+1. Verify Poppler installation and PATH
+2. Test PDF conversion manually
+3. Check PDF is not corrupted or password-protected
+
+## Support
+
+For processing new payslip formats, provide:
+1. Sample payslip (sensitive data redacted)
+2. List of fields to extract
+3. Clear indication of field locations
+
+## Limitations
+
+- Optimized for specific payslip format only
+- Requires significant VRAM (8GB minimum)
+- Not suitable for batch processing of varied formats
+- Requires prompt engineering for new formats
+- GPU required for practical use
+
+## Overview
+
+This application provides a complete solution for:
+- Extracting employee information and payment details from German payslips
+- Processing property listing documents to extract property details
+- Validating extracted information against database records
+- User-friendly interface for document upload and result viewing
+
+The system uses a sliding window approach with the powerful Qwen2.5-VL-7B model for accurate data extraction from images and PDFs.
+
+## Project Structure
+
+```
+payslip_processor/
+├── backend/                 # FastAPI backend
+│   ├── app/                # Main application code
+│   ├── config.yml          # Configuration settings
+│   ├── setup_model.py      # Model setup script
+│   └── payslips.db         # SQLite database
+├── frontend/               # frontend
+│   ├── app.py             # Main frontend application
+│   ├── static/            # Static assets
+│   ├── templates/         # HTML templates
+│   └── uploads/           # Temporary upload directory
+├── model_cache/           # Cached model files
+├── sample/                # Sample documents
+└── requirements.txt       # Python dependencies
+```
+
+## Database Schema
+
+The SQLite database contains the following tables:
+- `payslips`: Stores processed payslip information
+  - `id`: Unique identifier
+  - `employee_name`: Extracted employee name
+  - `gross_amount`: Gross salary amount
+  - `net_amount`: Net salary amount
+  - `processed_date`: Timestamp of processing
+  - `file_path`: Path to original document
