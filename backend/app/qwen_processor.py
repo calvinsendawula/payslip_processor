@@ -308,12 +308,12 @@ class QwenVLProcessor:
         if window_position == "top":
             prompt_text = """Du siehst die obere Hälfte einer deutschen Gehaltsabrechnung.
 
-            SUCHE PRÄZISE NACH: Dem Namen des Angestellten.
-            SCHAUE IN DIESEM BEREICH: Im oberen linken Viertel des Dokuments, oft nach "Herrn/Frau".
-            POSITION: Der Mitarbeitername steht oft in der Nähe der Personalnummer.
+            SUCHE PRÄZISE NACH: Dem Namen des Angestellten, der direkt nach der Überschrift "Herrn/Frau" steht.
+            SCHAUE IN DIESEM BEREICH: Im oberen linken Viertel des Dokuments, meist unter dem Label "Herrn/Frau".
+            POSITION: Der Name steht 3-4 Zeilen unter der Personalnummer.
 
             WICHTIG: Wenn du keinen Namen findest, gib "unknown" zurück.
-            Es soll der Name des Mitarbeiters sein, nicht der Name einer Firma oder Versicherung.
+            Ich brauche KEINEN Namen einer Firma oder einer Krankenversicherung, nur den Namen des Angestellten.
 
             Gib deinen Fund als JSON zurück:
             {
@@ -326,14 +326,25 @@ class QwenVLProcessor:
         else:  # bottom
             prompt_text = """Du siehst die untere Hälfte einer deutschen Gehaltsabrechnung.
 
-            SUCHE PRÄZISE NACH:
-            1. Bruttogehalt: Suche nach "Gesamt-Brutto" und dem dazugehörigen Betrag.
-            2. Nettogehalt: Suche nach "Auszahlungsbetrag" und dem dazugehörigen Betrag.
+            SUCHE PRÄZISE NACH BEIDEN WERTEN:
+            1. Bruttogehalt ("Gesamt-Brutto"): 
+               - WICHTIG: Es gibt zwei "Gesamt-Brutto" Werte im Dokument!
+               - Nimm NUR den Wert aus der oberen rechten Ecke
+               - Der korrekte Wert steht unter dem Label "Gesamt-Brutto"
+               - IGNORIERE den Wert unter "Verdienstbescheinigung" auf der linken Seite
+               - Der Wert sollte im Bereich von 1.000 € bis 10.000 € liegen
+               - Typischerweise ist dieser Wert kleiner als die Summen unter "Verdienstbescheinigung"
 
-            FORMAT: Beträge werden als Zahlen mit Tausenderpunkten und Komma für Dezimalstellen dargestellt.
+            2. Nettogehalt ("Auszahlungsbetrag"):
+               - Suche nach dem Label "Auszahlungsbetrag" ganz unten im Dokument
+               - Der Wert steht direkt daneben, meist rechts ausgerichtet
+               - Dies ist typischerweise die letzte Zahl im Dokument
+               - Der Wert sollte kleiner als das Bruttogehalt sein
 
-            WICHTIG: Gib NUR Werte zurück, die tatsächlich im Bild zu sehen sind.
-            Gib "0" zurück, wenn du einen Wert nicht findest.
+            WICHTIG:
+            - Gib NUR die Werte zurück, die zu diesen spezifischen Labels gehören
+            - Achte auf das korrekte Format: #.###,## (mit Punkt als Tausendertrennzeichen)
+            - Gib "0" zurück, wenn du einen Wert nicht sicher identifizieren kannst
 
             Gib deine Funde als JSON zurück:
             {
@@ -445,6 +456,24 @@ class QwenVLProcessor:
         logger.error(f"All resolution attempts failed for {window_position} window")
         return {"raw_text": f"Failed to process {window_position} window at all resolutions", "extraction_failed": True}
     
+    def _convert_german_number_format(self, value):
+        """Convert German number format (1.234,56 €) to database format (1234.56)"""
+        if not value or value == "0":
+            return "0"
+        
+        # Remove € symbol and whitespace
+        value = value.replace("€", "").strip()
+        
+        # Remove thousand separators (.) and replace decimal comma with point
+        value = value.replace(".", "").replace(",", ".")
+        
+        try:
+            # Convert to float and back to string to ensure valid number
+            return "{:.2f}".format(float(value))
+        except ValueError:
+            logger.warning(f"Failed to convert number format: {value}")
+            return "0"
+    
     def extract_payslip_data_sliding_window(self, image):
         """Extract payslip data using sliding window approach with progressive resolution"""
         logger.info("Using sliding window approach with 2 windows (top/bottom) and progressive resolution...")
@@ -499,15 +528,14 @@ class QwenVLProcessor:
                 
                 # Process payment info (primarily from bottom window)
                 if "gross_amount" in window_data and window_data["gross_amount"] not in ["0", "", "unknown"]:
-                    combined_data["payment"]["gross"] = window_data["gross_amount"]
+                    # Convert from German format to database format
+                    gross_amount = self._convert_german_number_format(window_data["gross_amount"])
+                    combined_data["payment"]["gross"] = gross_amount
+                
                 if "net_amount" in window_data and window_data["net_amount"] not in ["0", "", "unknown"]:
-                    combined_data["payment"]["net"] = window_data["net_amount"]
-        
-        # Add Euro symbol if missing in payment values
-        if combined_data["payment"]["gross"] != "0" and "€" not in combined_data["payment"]["gross"]:
-            combined_data["payment"]["gross"] += " €"
-        if combined_data["payment"]["net"] != "0" and "€" not in combined_data["payment"]["net"]:
-            combined_data["payment"]["net"] += " €"
+                    # Convert from German format to database format
+                    net_amount = self._convert_german_number_format(window_data["net_amount"])
+                    combined_data["payment"]["net"] = net_amount
         
         return combined_data
     
