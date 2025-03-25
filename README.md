@@ -17,6 +17,43 @@ This application is currently optimized for processing a specific payslip format
   - Net amount (Auszahlungsbetrag from bottom-right corner)
 - The model CAN process any document type but needs specific guidance for each new format
 
+## Resolution Settings and Processing Time
+The application uses a progressive resolution approach starting from a high resolution (default: 1500px) and gradually reducing it if needed depending on the capabliities of your GPU. This affects processing time significantly:
+
+- Higher initial resolution = Better accuracy but slower processing
+- Lower initial resolution = Faster processing but potentially reduced accuracy
+- Processing time varies based on your GPU's VRAM:
+  - Example: With 8GB VRAM (5GB used by model):
+    - 1500px resolution: ~14 minutes per page (high accuracy)
+    - Lower resolutions: Significantly faster but may reduce accuracy
+
+You can adjust these settings in `backend/config.yml`:
+```yaml
+image:
+  initial_resolution: 1500  # Starting resolution
+  resolution_steps: [1500, 1200, 1000, 800, 600]  # Progressive reduction steps
+```
+
+> **Important Notes**: 
+> - The `initial_resolution` must be less than or equal to the first value in the `resolution_steps` list
+> - While you can reduce the resolution steps to speed up processing, always keep at least one value in the list
+> - For optimal performance, experiment with different resolution values to find the right balance between speed and accuracy for your specific GPU
+
+### Recommended Parameter Ranges
+For the best balance between processing time and accuracy, consider these ranges:
+
+| Parameter | Minimum | Recommended | Maximum | Notes |
+|-----------|---------|-------------|---------|-------|
+| `initial_resolution` | 600 | 1000-1200 | 1500 | Higher values significantly increase processing time |
+| `resolution_steps` | Single value | 2-3 values | 5 values | More steps = more attempts but longer processing |
+| `pdf.dpi` | 300 | 450 | 600 | Higher DPI values capture more detail but require more memory |
+
+These ranges are based on how practical it would be to run the program. For most 8GB+ VRAM GPUs:
+- Starting at 1000px resolution offers a good balance
+- Starting at 1500px provides the highest accuracy
+- Values below 600px may miss small text or details
+- Values above 1500px rarely provide additional accuracy but greatly increase processing time
+
 ## System Requirements
 
 ### Hardware Requirements
@@ -127,6 +164,23 @@ Access the application at http://localhost:5173
    - Gross Amount: 2124.00
    - Net Amount: 1374.78
 
+
+## Logging
+
+The application creates detailed logs of all processing operations in:
+```
+backend/logs/payslip_processor.log
+```
+
+Log entries include:
+- Timestamps for all operations
+- Processing times for document extraction and validation
+- Clear session separation between application runs
+- Warning and error messages with detailed information
+- Validation results and success/failure indicators
+
+Logs are appended to the same file across multiple runs for easy troubleshooting and performance monitoring.
+
 ## Processing Different Payslip Formats
 
 To adapt the system for different payslip formats:
@@ -152,6 +206,7 @@ To adapt the system for different payslip formats:
   - Available VRAM (more = faster processing)
   - Memory allocation settings in config.yaml
   - GPU acceleration is crucial for reasonable performance
+  - Image resolution settings significantly impact processing time
 
 ## Troubleshooting
 
@@ -222,19 +277,3 @@ The SQLite database contains the following tables:
   - `net_amount`: Net salary amount
   - `processed_date`: Timestamp of processing
   - `file_path`: Path to original document
-
-## Logging
-
-The application creates detailed logs of all processing operations in:
-```
-backend/logs/payslip_processor.log
-```
-
-Log entries include:
-- Timestamps for all operations
-- Processing times for document extraction and validation
-- Clear session separation between application runs
-- Warning and error messages with detailed information
-- Validation results and success/failure indicators
-
-Logs are appended to the same file across multiple runs for easy troubleshooting and performance monitoring.
