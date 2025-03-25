@@ -62,7 +62,6 @@ ENV/
 uploads/
 
 # Custom files and folders
-german_payslip_V2.pdf
 gemma.txt
 paddle_mistral_report_V2.md
 paddle_mistral_report.md
