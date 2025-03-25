@@ -222,3 +222,19 @@ The SQLite database contains the following tables:
   - `net_amount`: Net salary amount
   - `processed_date`: Timestamp of processing
   - `file_path`: Path to original document
+
+## Logging
+
+The application creates detailed logs of all processing operations in:
+```
+backend/logs/payslip_processor.log
+```
+
+Log entries include:
+- Timestamps for all operations
+- Processing times for document extraction and validation
+- Clear session separation between application runs
+- Warning and error messages with detailed information
+- Validation results and success/failure indicators
+
+Logs are appended to the same file across multiple runs for easy troubleshooting and performance monitoring.

@@ -216,10 +216,22 @@ document.addEventListener('DOMContentLoaded', function() {
         // Store the extracted data for later validation
         currentExtractedData = data;
         
-        // Display the data
-        document.getElementById('employee-name').textContent = data.employee.name;
-        document.getElementById('payment-gross').textContent = data.payment.gross;
-        document.getElementById('payment-net').textContent = data.payment.net;
+        // Display the extracted data
+        document.getElementById('employee-name').textContent = data.employee.name || '';
+        document.getElementById('payment-gross').textContent = data.payment.gross || '';
+        document.getElementById('payment-net').textContent = data.payment.net || '';
+        
+        // Display processing time if available
+        const statusElement = document.getElementById('payslip-status');
+        if (data.processing_time) {
+            statusElement.innerHTML = 
+                `<span class="material-icons">check_circle</span><span>Verarbeitung abgeschlossen in ${data.processing_time}</span>`;
+            statusElement.className = 'summary-item success';
+        } else {
+            statusElement.innerHTML = 
+                `<span class="material-icons">check_circle</span><span>Verarbeitung abgeschlossen</span>`;
+            statusElement.className = 'summary-item success';
+        }
         
         // Set all indicators to pending state
         const nameMatch = document.getElementById('employee-name-match');
@@ -234,11 +246,6 @@ document.addEventListener('DOMContentLoaded', function() {
         
         netMatch.innerHTML = '<span class="material-icons">pending</span>';
         netMatch.className = 'detail-match match-pending';
-        
-        // Update status to show we need validation
-        const statusElement = document.getElementById('payslip-status');
-        statusElement.innerHTML = '<span class="material-icons">info</span><span>Daten extrahiert. Bitte geben Sie eine Mitarbeiter-ID ein, um zu validieren.</span>';
-        statusElement.className = 'summary-item info';
         
         // Show the employee search container
         if (employeeSearch) {
