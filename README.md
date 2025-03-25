@@ -2,6 +2,8 @@
 
 A FastAPI application that processes German payslips using the Qwen2.5-VL-7B vision-language model.
 
+![DokProz](https://github.com/user-attachments/assets/00d063af-e50a-431e-b468-04ffaa75f3a5)
+
 ## ⚠️ Important Notes - Please Read First
 
 This application is currently optimized for processing a specific payslip format (sample_payslip_v2.pdf). The vision-language model has been specifically trained with prompts tailored to this document structure.
