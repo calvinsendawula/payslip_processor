@@ -75,3 +75,12 @@ qwen2_5_vl_7b_sliding_window_ocr.py
 
 Z_reports/
 model_cache/
+
+# PyPI package files
+pypi_package/
+pypi_package/qwen_payslip_processor/model_files/
+
+# PayslipExtract test project
+PayslipExtract/
+PayslipExtract/uploads/
+PayslipExtract/saved_configs/
