@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Multipage PDF Processor with Memory Isolation</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .container {
+            border: 1px solid #ccc;
+            border-radius: 5px;
+            padding: 20px;
+            margin-bottom: 20px;
+        }
+        .result-container {
+            white-space: pre-wrap;
+            background-color: #f5f5f5;
+            padding: 15px;
+            border-radius: 5px;
+            overflow-x: auto;
+        }
+        .preview-container {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            margin-top: 20px;
+        }
+        .preview-item {
+            border: 1px solid #ddd;
+            padding: 10px;
+            border-radius: 5px;
+        }
+        .preview-img {
+            max-width: 400px;
+            max-height: 400px;
+        }
+        h3 {
+            margin-top: 0;
+        }
+        .processing-time {
+            font-weight: bold;
+            color: #0066cc;
+            margin-top: 10px;
+        }
+        .highlight {
+            background-color: #e6f7ff;
+            padding: 10px;
+            border-radius: 5px;
+            border-left: 4px solid #1890ff;
+            margin: 10px 0;
+        }
+        .memory-info {
+            background-color: #f6ffed;
+            padding: 10px;
+            border-radius: 5px;
+            border-left: 4px solid #52c41a;
+            margin: 10px 0;
+        }
+        .medium-isolation {
+            background-color: #fffbe6;
+            padding: 10px;
+            border-radius: 5px;
+            border-left: 4px solid #faad14;
+            margin: 10px 0;
+        }
+    </style>
+</head>
+<body>
+    <h1>Multipage PDF Processor with Memory Isolation</h1>
+    
+    <div class="container">
+        <h2>Upload PDF Document</h2>
+        <form id="uploadForm" enctype="multipart/form-data">
+            <input type="file" id="fileInput" name="file" accept=".pdf">
+            <button type="submit">Process PDF</button>
+        </form>
+    </div>
+
+    <div class="memory-info">
+        <h3>Memory Isolation Feature (v0.2.1)</h3>
+        <p>This application uses the new <strong>memory isolation</strong> feature from qwen-payslip-processor v0.2.1.</p>
+        <p>Starting with strict isolation: each window is processed in a separate process with a fresh model instance.</p>
+        <p><em>Note: The package will automatically fall back to medium isolation if strict isolation is not supported on your platform or fails for any reason.</em></p>
+    </div>
+
+    <div class="container" id="processingInfo" style="display: none;">
+        <h2>Processing Information</h2>
+        <p>This will process:</p>
+        <ul>
+            <li>Page 1: Top-left corner and bottom-right corner</li>
+            <li>Page 2: Bottom-left corner only</li>
+        </ul>
+        <div class="highlight">Using <strong>strict</strong> memory isolation for maximum accuracy</div>
+        <div class="medium-isolation" style="display: none; background-color: #fffbe6; padding: 10px; border-radius: 5px; border-left: 4px solid #faad14; margin: 10px 0;">Using <strong>medium</strong> memory isolation - strict isolation was not available</div>
+        <div id="processingStatus">Processing... Please wait.</div>
+        <div id="processingTime" class="processing-time"></div>
+    </div>
+    
+    <div class="container" id="resultContainer" style="display: none;">
+        <h2>Results</h2>
+        <div class="result-container" id="resultJson"></div>
+    </div>
+
+    <script>
+        // Format time function for human-readable output
+        function formatTime(seconds) {
+            if (seconds < 60) {
+                return seconds.toFixed(2) + " seconds";
+            } else if (seconds < 3600) {
+                const minutes = Math.floor(seconds / 60);
+                const remainingSeconds = seconds % 60;
+                return minutes + " minutes, " + remainingSeconds.toFixed(0) + " seconds";
+            } else {
+                const hours = Math.floor(seconds / 3600);
+                const remainingMinutes = Math.floor((seconds % 3600) / 60);
+                return hours + " hours, " + remainingMinutes + " minutes";
+            }
+        }
+
+        document.getElementById('uploadForm').addEventListener('submit', function(e) {
+            e.preventDefault();
+            
+            var fileInput = document.getElementById('fileInput');
+            var file = fileInput.files[0];
+            
+            if (!file) {
+                alert('Please select a file to upload');
+                return;
+            }
+            
+            // Show processing info
+            document.getElementById('processingInfo').style.display = 'block';
+            document.getElementById('resultContainer').style.display = 'none';
+            document.getElementById('processingStatus').textContent = 'Processing... Please wait.';
+            document.getElementById('processingTime').textContent = '';
+            
+            var formData = new FormData();
+            formData.append('file', file);
+            
+            // Record start time for client-side timing
+            const startTime = new Date().getTime();
+            
+            fetch('/process', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => response.json())
+            .then(data => {
+                // Calculate client-side processing time
+                const clientTime = (new Date().getTime() - startTime) / 1000;
+                
+                // Use server-reported time if available, otherwise use client time
+                const processingTime = data.processing_time || clientTime;
+                
+                // Update status and display result
+                document.getElementById('processingStatus').textContent = data.status === 'success' ? 'Processing complete!' : 'Error: ' + data.error;
+                document.getElementById('processingTime').textContent = 'Time taken: ' + formatTime(processingTime);
+                document.getElementById('resultContainer').style.display = 'block';
+                
+                // Get isolation mode information
+                const isolationMode = data.result.isolation_mode || { 
+                    requested: data.isolation_mode || 'unknown', 
+                    actual: data.isolation_mode || 'unknown',
+                    stats: {}
+                };
+                
+                // Show appropriate isolation mode message
+                const isolationInfo = isolationMode.actual === 'mixed' 
+                    ? `Requested <strong>${isolationMode.requested}</strong> isolation, but some windows used <strong>medium</strong> isolation as fallback.`
+                    : `Successfully used <strong>${isolationMode.actual}</strong> isolation for all windows.`;
+                
+                // Get stats for more detailed information
+                const stats = isolationMode.stats || {};
+                const statsText = stats.windows_processed 
+                    ? `<br>Windows processed: ${stats.windows_processed}, ` + 
+                      `Strict mode: ${stats.strict_succeeded || 0}, ` +
+                      `Medium mode: ${stats.medium_used || 0}, ` +
+                      `Fallbacks: ${stats.fallbacks_occurred || 0}`
+                    : '';
+                
+                // Update UI based on isolation mode
+                if (isolationMode.actual === 'medium' || isolationMode.actual === 'mixed') {
+                    document.querySelector('.highlight').style.display = 'none';
+                    document.querySelector('.medium-isolation').style.display = 'block';
+                    document.querySelector('.medium-isolation').innerHTML = 
+                        `Using <strong>${isolationMode.actual}</strong> memory isolation. ${isolationInfo}${statsText}`;
+                } else {
+                    document.querySelector('.highlight').style.display = 'block';
+                    document.querySelector('.medium-isolation').style.display = 'none';
+                    document.querySelector('.highlight').innerHTML = 
+                        `Using <strong>${isolationMode.actual}</strong> memory isolation for maximum accuracy. ${isolationInfo}${statsText}`;
+                }
+                
+                // Display JSON result
+                document.getElementById('resultJson').textContent = JSON.stringify(data.result, null, 2);
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                document.getElementById('processingStatus').textContent = 'Error processing file: ' + error;
+            });
+        });
+    </script>
+</body>
+</html>
