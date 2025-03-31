@@ -198,6 +198,97 @@
                 
                 // Display JSON result
                 document.getElementById('resultJson').textContent = JSON.stringify(data.result, null, 2);
+                
+                // Create a more user-friendly summary if there are results
+                if (data.result && data.result.results && data.result.results.length > 0) {
+                    // First check for payslip data (for backward compatibility)
+                    const payslipData = data.result.results.find(r => 
+                        r.employee_name !== "unknown" || 
+                        r.gross_amount !== "0" ||
+                        r.net_amount !== "0");
+                    
+                    if (payslipData) {
+                        const payslipDiv = document.createElement('div');
+                        payslipDiv.className = 'highlight';
+                        payslipDiv.innerHTML = `
+                            <h3>Payslip Information (Page ${payslipData.page_number || 1})</h3>
+                            <ul>
+                                <li><strong>Employee:</strong> ${payslipData.employee_name !== "unknown" ? payslipData.employee_name : "Not found"}</li>
+                                <li><strong>Gross Amount:</strong> ${payslipData.gross_amount !== "0" ? payslipData.gross_amount : "Not found"}</li>
+                                <li><strong>Net Amount:</strong> ${payslipData.net_amount !== "0" ? payslipData.net_amount : "Not found"}</li>
+                            </ul>
+                        `;
+                        document.getElementById('resultContainer').appendChild(payslipDiv);
+                    }
+                    
+                    // Check for supervisor information on page 2
+                    const supervisorInfo = data.result.results.find(r => r.supervisor_info);
+                    
+                    if (supervisorInfo && supervisorInfo.supervisor_info) {
+                        const summaryDiv = document.createElement('div');
+                        summaryDiv.className = 'highlight';
+                        summaryDiv.innerHTML = `
+                            <h3>Supervisor Information (Page ${supervisorInfo.page_number || 2})</h3>
+                            <ul>
+                                <li><strong>Name:</strong> ${supervisorInfo.supervisor_info.name}</li>
+                                <li><strong>Position:</strong> ${supervisorInfo.supervisor_info.position}</li>
+                                <li><strong>Contact:</strong> ${supervisorInfo.supervisor_info.contact}</li>
+                            </ul>
+                        `;
+                        document.getElementById('resultContainer').appendChild(summaryDiv);
+                    }
+                    
+                    // Display any other extracted data from different windows
+                    // This handles arbitrary document types beyond payslips
+                    const resultContainer = document.getElementById('resultContainer');
+                    data.result.results.forEach(pageResult => {
+                        // Look for window-specific sections (e.g., found_in_bottom_left)
+                        Object.keys(pageResult).forEach(key => {
+                            if (key.startsWith('found_in_') && typeof pageResult[key] === 'object') {
+                                const windowData = pageResult[key];
+                                // Skip if we've already displayed this data in a specialized section
+                                const isPayslipData = 
+                                    'employee_name' in windowData && 
+                                    'gross_amount' in windowData && 
+                                    'net_amount' in windowData;
+                                
+                                const isSupervisorData = 
+                                    'supervisor_name' in windowData && 
+                                    'supervisor_position' in windowData;
+                                
+                                // Only display if it's not something we've already handled
+                                if (!isPayslipData && !isSupervisorData) {
+                                    const sectionDiv = document.createElement('div');
+                                    sectionDiv.className = 'highlight';
+                                    
+                                    // Generate a readable section title from the key
+                                    const sectionTitle = key
+                                        .replace('found_in_', '')
+                                        .split('_')
+                                        .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+                                        .join(' ');
+                                    
+                                    let sectionHTML = `<h3>Custom Data from ${sectionTitle} (Page ${pageResult.page_number})</h3><ul>`;
+                                    
+                                    // Add all fields from this section
+                                    Object.entries(windowData).forEach(([fieldName, value]) => {
+                                        if (fieldName !== 'confidence') {
+                                            const fieldLabel = fieldName
+                                                .replace(/_/g, ' ')
+                                                .replace(/\b\w/g, l => l.toUpperCase());
+                                                
+                                            sectionHTML += `<li><strong>${fieldLabel}:</strong> ${value}</li>`;
+                                        }
+                                    });
+                                    
+                                    sectionHTML += `</ul>`;
+                                    sectionDiv.innerHTML = sectionHTML;
+                                    resultContainer.appendChild(sectionDiv);
+                                }
+                            }
+                        });
+                    });
+                }
             })
             .catch(error => {
                 console.error('Error:', error);

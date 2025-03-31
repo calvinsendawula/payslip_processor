@@ -3,10 +3,12 @@ import io
 import time
 import torch
 import gc
+from pathlib import Path
 from flask import Flask, request, render_template, jsonify
 from qwen_payslip_processor import QwenPayslipProcessor
 from qwen_payslip_processor.utils import cleanup_memory
 import logging
+from transformers import AutoProcessor, AutoModelForImageTextToText
 
 app = Flask(__name__)
 app.config['UPLOAD_FOLDER'] = 'uploads'
@@ -174,11 +176,59 @@ def process_pdf():
         """
     }
     
-    # Initialize processor with memory_isolation set to "strict" for complete isolation
-    processor = QwenPayslipProcessor(
-        config=config, 
+    # Get the absolute path to the model files
+    package_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    model_dir = os.path.join(package_dir, "pypi_package", "qwen_payslip_processor", "model_files")
+    model_path = os.path.join(model_dir, "model")
+    processor_path = os.path.join(model_dir, "processor")
+    
+    # Make sure the environment knows where to find local models
+    os.environ["TRANSFORMERS_OFFLINE"] = "1"  # Force offline mode
+    
+    # Create a modified config to use local model files
+    modified_config = config.copy()
+    
+    # Adding model location settings to the config
+    if "model_paths" not in modified_config:
+        modified_config["model_paths"] = {}
+    
+    modified_config["model_paths"]["model_dir"] = model_dir
+    modified_config["model_paths"]["model_path"] = model_path
+    modified_config["model_paths"]["processor_path"] = processor_path
+    modified_config["model_paths"]["use_local_files"] = True
+    
+    # Create a class extension to override model loading
+    class LocalQwenProcessor(QwenPayslipProcessor):
+        def _load_model(self):
+            try:
+                logger.info("Loading local Qwen model...")
+                # Override model paths to use local files
+                local_model_path = self.config["model_paths"]["model_path"]
+                local_processor_path = self.config["model_paths"]["processor_path"] 
+                
+                # Load processor and model with the local paths
+                self.processor = AutoProcessor.from_pretrained(local_processor_path, local_files_only=True)
+                self.model = AutoModelForImageTextToText.from_pretrained(
+                    local_model_path,
+                    torch_dtype=torch.float16 if self.device.type == "cuda" else torch.float32,
+                    device_map="auto" if self.device.type == "cuda" else None,
+                    local_files_only=True
+                )
+                
+                # Move to CPU if needed
+                if self.device.type != "cuda":
+                    self.model = self.model.to(self.device)
+                    
+                logger.info("Local model loaded successfully")
+            except Exception as e:
+                logger.error(f"Error loading local model: {e}")
+                raise
+    
+    # Initialize processor with the custom class and modified config
+    processor = LocalQwenProcessor(
+        config=modified_config, 
         custom_prompts=custom_prompts,
-        memory_isolation="strict"  # Use strict isolation for maximum reliability
+        memory_isolation="none"  # Keep memory isolation off as requested
     )
     
     # Force initial memory cleanup 
@@ -204,6 +254,22 @@ def process_pdf():
         # Process second page
         second_page_result = processor.process_pdf(pdf_bytes, pages=[2])
         if "results" in second_page_result and len(second_page_result["results"]) > 0:
+            # Post-process page 2 results to properly format supervisor information
+            for page_result in second_page_result["results"]:
+                # Check for supervisor information directly from the model's response
+                if "found_in_bottom_left" in page_result:
+                    supervisor_data = page_result["found_in_bottom_left"]
+                    
+                    # If supervisor fields are present in the direct model output
+                    if "supervisor_name" in supervisor_data:
+                        # Add formatted supervisor information for easier access
+                        page_result["supervisor_info"] = {
+                            "name": supervisor_data.get("supervisor_name", "nicht gefunden"),
+                            "position": supervisor_data.get("supervisor_position", "unbekannt"),
+                            "contact": supervisor_data.get("supervisor_contact", "unbekannt")
+                        }
+                
+            # Add results to the combined list
             all_results.extend(second_page_result["results"])
         if "total_pages" in second_page_result and total_pages == 0:
             total_pages = second_page_result["total_pages"]
