@@ -148,22 +148,19 @@ def process_pdf():
         Du siehst den unteren linken Bereich auf Seite 2 des Dokuments.
 
         FINDE NUR: 
-        1. Name des Vorgesetzten/Supervisors
-        2. Position des Vorgesetzten
-        3. Kontaktinformationen des Vorgesetzten
+        Den Namen des Vorgesetzten/Supervisors
         
         WICHTIG:
-        - Extrahiere NUR diese drei Werte zum Vorgesetzten
+        - Extrahiere NUR den Namen des Vorgesetzten, KEINE anderen Informationen
+        - IGNORIERE Positionen, Kontaktdaten und alle anderen Details
         - IGNORIERE alle Informationen über Mitarbeiter, Gehälter oder andere Personen
         - Suche nach Abschnitten mit "Supervisor:", "Vorgesetzter:", "Manager:" o.ä.
-        - Wenn ein Wert nicht gefunden wird, verwende Standardwerte
+        - Wenn kein Name gefunden wird, gib "nicht gefunden" zurück
         
         Gib GENAU dieses JSON-Format zurück:
         {
         "found_in_bottom_left": {
-            "supervisor_name": "Name des Vorgesetzten oder 'nicht gefunden'",
-            "supervisor_position": "Position des Vorgesetzten oder 'unbekannt'",
-            "supervisor_contact": "Kontaktinformationen oder 'unbekannt'"
+            "supervisor_name": "Name des Vorgesetzten oder 'nicht gefunden'"
         }
         }
         """
@@ -236,7 +233,14 @@ def process_pdf():
         # Process first page
         first_page_result = processor.process_pdf(pdf_bytes, pages=[1])
         if "results" in first_page_result and len(first_page_result["results"]) > 0:
-            all_results.extend(first_page_result["results"])
+            # Remove any top-level fields that are not from the raw model output
+            for result in first_page_result["results"]:
+                # Keep only page metadata and found_in fields
+                keys_to_keep = ["page_index", "page_number"] + [k for k in result.keys() if k.startswith("found_in_")]
+                # Create a clean result with only the fields we want
+                clean_result = {k: result[k] for k in keys_to_keep}
+                # Add the clean result to all_results
+                all_results.append(clean_result)
         if "total_pages" in first_page_result:
             total_pages = first_page_result["total_pages"]
         processed_pages += 1
@@ -247,35 +251,14 @@ def process_pdf():
         # Process second page
         second_page_result = processor.process_pdf(pdf_bytes, pages=[2])
         if "results" in second_page_result and len(second_page_result["results"]) > 0:
-            # Post-process page 2 results to properly format supervisor information
-            for page_result in second_page_result["results"]:
-                # Start with a clean slate for page 2 - don't carry over employee data
-                page_result["employee_name"] = "not_applicable"
-                page_result["gross_amount"] = "not_applicable"
-                page_result["net_amount"] = "not_applicable"
-                
-                # Extract ONLY supervisor information
-                if "found_in_bottom_left" in page_result:
-                    supervisor_data = page_result["found_in_bottom_left"]
-                    
-                    # Extract supervisor information in a clean format
-                    page_result["supervisor_info"] = {
-                        "name": supervisor_data.get("supervisor_name", "nicht gefunden"),
-                        "position": supervisor_data.get("supervisor_position", "unbekannt"),
-                        "contact": supervisor_data.get("supervisor_contact", "unbekannt")
-                    }
-                    
-                    # Remove any irrelevant fields that might have been extracted
-                    # Keep only the specifically requested supervisor fields
-                    clean_supervisor_data = {
-                        "supervisor_name": supervisor_data.get("supervisor_name", "nicht gefunden"),
-                        "supervisor_position": supervisor_data.get("supervisor_position", "unbekannt"), 
-                        "supervisor_contact": supervisor_data.get("supervisor_contact", "unbekannt")
-                    }
-                    page_result["found_in_bottom_left"] = clean_supervisor_data
-                
-            # Add results to the combined list
-            all_results.extend(second_page_result["results"])
+            # Remove any top-level fields that are not from the raw model output
+            for result in second_page_result["results"]:
+                # Keep only page metadata and found_in fields
+                keys_to_keep = ["page_index", "page_number"] + [k for k in result.keys() if k.startswith("found_in_")]
+                # Create a clean result with only the fields we want
+                clean_result = {k: result[k] for k in keys_to_keep}
+                # Add the clean result to all_results
+                all_results.append(clean_result)
         if "total_pages" in second_page_result and total_pages == 0:
             total_pages = second_page_result["total_pages"]
         processed_pages += 1
@@ -288,7 +271,7 @@ def process_pdf():
     # Calculate total processing time
     processing_time = time.time() - start_time
     
-    # Create combined result
+    # Create combined result with ONLY the raw model outputs and package metadata
     result = {
         "results": all_results,
         "processing_time": processing_time,
@@ -307,25 +290,12 @@ def process_pdf():
     # Add isolation mode to the result
     result["isolation_mode"] = isolation_mode
     
-    # Create a clean, simplified final result with only the exact data needed
-    clean_result = {
-        "results": all_results,  # Keep the original results array
-        "processing_time": processing_time,
-        "processed_pages": processed_pages,
-        "total_pages": total_pages,
-        "isolation_mode": isolation_mode,
-        "employee_name": all_results[0]["employee_name"] if all_results and len(all_results) > 0 else "unknown",
-        "gross_amount": all_results[0]["gross_amount"] if all_results and len(all_results) > 0 else "0",
-        "net_amount": all_results[0]["net_amount"] if all_results and len(all_results) > 0 else "0",
-        "supervisor_name": all_results[1]["supervisor_info"]["name"] if len(all_results) > 1 and "supervisor_info" in all_results[1] else "nicht gefunden"
-    }
-    
-    # Return results and filename with the simplified output
+    # Return results and filename with ONLY raw model output and package metadata
     return jsonify({
         'status': 'success',
         'filename': file.filename,
         'processing_time': processing_time,
-        'result': clean_result  # Return the clean, simplified result
+        'result': result  # Return only raw model outputs and package metadata
     })
 
 if __name__ == '__main__':
