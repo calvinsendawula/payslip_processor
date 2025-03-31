@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Multipage PDF Processor with Memory Isolation</title>
+    <title>Multipage PDF Processor v0.1.3</title>
     <style>
         body {
             font-family: Arial, sans-serif;
@@ -71,7 +71,7 @@
     </style>
 </head>
 <body>
-    <h1>Multipage PDF Processor with Memory Isolation</h1>
+    <h1>Multipage PDF Processor</h1>
     
     <div class="container">
         <h2>Upload PDF Document</h2>
@@ -82,21 +82,21 @@
     </div>
 
     <div class="memory-info">
-        <h3>Memory Isolation Feature (v0.2.1)</h3>
-        <p>This application uses the new <strong>memory isolation</strong> feature from qwen-payslip-processor v0.2.1.</p>
-        <p>Starting with strict isolation: each window is processed in a separate process with a fresh model instance.</p>
-        <p><em>Note: The package will automatically fall back to medium isolation if strict isolation is not supported on your platform or fails for any reason.</em></p>
+        <h3>Document Processing Features (v0.1.3)</h3>
+        <p>This application uses the qwen-payslip-processor v0.1.3 to extract information from documents.</p>
+        <p>Currently running with <strong>no memory isolation</strong> for faster processing.</p>
+        <p><em>Note: The application extracts specific information from different areas of each page.</em></p>
     </div>
 
     <div class="container" id="processingInfo" style="display: none;">
         <h2>Processing Information</h2>
         <p>This will process:</p>
         <ul>
-            <li>Page 1: Top-left corner and bottom-right corner</li>
-            <li>Page 2: Bottom-left corner only</li>
+            <li>Page 1: Top-left corner (employee name) and bottom-right corner (financial information)</li>
+            <li>Page 2: Bottom-left corner (supervisor information)</li>
         </ul>
-        <div class="highlight">Using <strong>strict</strong> memory isolation for maximum accuracy</div>
-        <div class="medium-isolation" style="display: none; background-color: #fffbe6; padding: 10px; border-radius: 5px; border-left: 4px solid #faad14; margin: 10px 0;">Using <strong>medium</strong> memory isolation - strict isolation was not available</div>
+        <div class="highlight">Using <strong>no memory isolation</strong> for faster processing</div>
+        <div class="medium-isolation" style="display: none;">Using <strong>medium</strong> memory isolation for balanced processing</div>
         <div id="processingStatus">Processing... Please wait.</div>
         <div id="processingTime" class="processing-time"></div>
     </div>
@@ -184,7 +184,12 @@
                     : '';
                 
                 // Update UI based on isolation mode
-                if (isolationMode.actual === 'medium' || isolationMode.actual === 'mixed') {
+                if (isolationMode.actual === 'none') {
+                    document.querySelector('.highlight').style.display = 'block';
+                    document.querySelector('.medium-isolation').style.display = 'none';
+                    document.querySelector('.highlight').innerHTML = 
+                        `Using <strong>no memory isolation</strong> for faster processing. ${statsText}`;
+                } else if (isolationMode.actual === 'medium' || isolationMode.actual === 'mixed') {
                     document.querySelector('.highlight').style.display = 'none';
                     document.querySelector('.medium-isolation').style.display = 'block';
                     document.querySelector('.medium-isolation').innerHTML = 
@@ -193,19 +198,24 @@
                     document.querySelector('.highlight').style.display = 'block';
                     document.querySelector('.medium-isolation').style.display = 'none';
                     document.querySelector('.highlight').innerHTML = 
-                        `Using <strong>${isolationMode.actual}</strong> memory isolation for maximum accuracy. ${isolationInfo}${statsText}`;
+                        `Using <strong>${isolationMode.actual}</strong> memory isolation. ${isolationInfo}${statsText}`;
                 }
                 
                 // Display JSON result
-                document.getElementById('resultJson').textContent = JSON.stringify(data.result, null, 2);
+                try {
+                    document.getElementById('resultJson').textContent = JSON.stringify(data.result, null, 2);
+                } catch (error) {
+                    console.error('Error formatting JSON result:', error);
+                    document.getElementById('resultJson').textContent = 'Error displaying result: ' + error.message;
+                }
                 
                 // Create a more user-friendly summary if there are results
                 if (data.result && data.result.results && data.result.results.length > 0) {
                     // First check for payslip data (for backward compatibility)
                     const payslipData = data.result.results.find(r => 
-                        r.employee_name !== "unknown" || 
-                        r.gross_amount !== "0" ||
-                        r.net_amount !== "0");
+                        r.employee_name !== "unknown" && 
+                        r.employee_name !== "not_applicable" && 
+                        (r.gross_amount !== "0" || r.net_amount !== "0"));
                     
                     if (payslipData) {
                         const payslipDiv = document.createElement('div');
@@ -230,9 +240,9 @@
                         summaryDiv.innerHTML = `
                             <h3>Supervisor Information (Page ${supervisorInfo.page_number || 2})</h3>
                             <ul>
-                                <li><strong>Name:</strong> ${supervisorInfo.supervisor_info.name}</li>
-                                <li><strong>Position:</strong> ${supervisorInfo.supervisor_info.position}</li>
-                                <li><strong>Contact:</strong> ${supervisorInfo.supervisor_info.contact}</li>
+                                <li><strong>Name:</strong> ${supervisorInfo.supervisor_info.name || "Not found"}</li>
+                                <li><strong>Position:</strong> ${supervisorInfo.supervisor_info.position || "Unknown"}</li>
+                                <li><strong>Contact:</strong> ${supervisorInfo.supervisor_info.contact || "Unknown"}</li>
                             </ul>
                         `;
                         document.getElementById('resultContainer').appendChild(summaryDiv);
