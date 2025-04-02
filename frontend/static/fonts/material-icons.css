@@ -1,0 +1,42 @@
+/* Local Material Icons font for air-gapped operation */
+@font-face {
+  font-family: 'Material Icons';
+  font-style: normal;
+  font-weight: 400;
+  src: url('./material-icons.woff2') format('woff2'),
+       url('./material-icons.woff') format('woff');
+}
+
+.material-icons {
+  font-family: 'Material Icons';
+  font-weight: normal;
+  font-style: normal;
+  font-size: 24px;  /* Preferred icon size */
+  display: inline-block;
+  line-height: 1;
+  text-transform: none;
+  letter-spacing: normal;
+  word-wrap: normal;
+  white-space: nowrap;
+  direction: ltr;
+
+  /* Support for all WebKit browsers. */
+  -webkit-font-smoothing: antialiased;
+  /* Support for Safari and Chrome. */
+  text-rendering: optimizeLegibility;
+
+  /* Support for Firefox. */
+  -moz-osx-font-smoothing: grayscale;
+
+  /* Support for IE. */
+  font-feature-settings: 'liga';
+}
+
+/* Note: Download these font files from:
+ * https://fonts.googleapis.com/icon?family=Material+Icons
+ * 
+ * For air-gapped environments, Material Icons can be downloaded from:
+ * https://github.com/google/material-design-icons/tree/master/font
+ * 
+ * Save the font files in the same directory as this CSS file
+ */ 

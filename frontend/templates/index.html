@@ -5,8 +5,50 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Dokumentenverarbeitung Dashboard</title>
     <link rel="stylesheet" href="/static/css/styles.css">
-    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&display=swap" rel="stylesheet">
-    <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
+    <link rel="stylesheet" href="/static/fonts/roboto.css">
+    <link rel="stylesheet" href="/static/fonts/material-icons.css">
+    <style>
+        /* Docker status indicator styles */
+        .docker-status {
+            margin-top: auto;
+            padding: 15px;
+            border-top: 1px solid rgba(255, 255, 255, 0.1);
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .status-indicator {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background-color: #aaa;
+        }
+        .status-running {
+            background-color: #4CAF50;
+            box-shadow: 0 0 8px #4CAF50;
+        }
+        .status-stopped {
+            background-color: #F44336;
+            box-shadow: 0 0 8px #F44336;
+        }
+        .status-loading {
+            background-color: #FFC107;
+            animation: pulse 1.5s infinite;
+        }
+        .status-error {
+            background-color: #F44336;
+            animation: pulse 1.5s infinite;
+        }
+        @keyframes pulse {
+            0% { opacity: 0.5; }
+            50% { opacity: 1; }
+            100% { opacity: 0.5; }
+        }
+        .status-text {
+            font-size: 0.8rem;
+            color: rgba(255, 255, 255, 0.7);
+        }
+    </style>
 </head>
 <body>
     <div class="dashboard">
@@ -27,79 +69,232 @@
                     </li>
                 </ul>
             </nav>
+            
+            <!-- Docker Container Status -->
+            <div class="docker-status">
+                <div class="status-indicator status-loading" id="docker-status-indicator"></div>
+                <div class="status-text" id="docker-status-text">Prüfe Docker-Status...</div>
+            </div>
         </div>
         
         <div class="main-content">
             <div class="tab-content active" id="payslips-tab">
                 <div class="content-header">
                     <h1>Gehaltsabrechnungs-Verarbeitung</h1>
-                    <p>Laden Sie eine Gehaltsabrechnung hoch, um Informationen zu extrahieren und zu validieren</p>
+                    <p>Laden Sie eine Gehaltsabrechnung hoch, um Informationen zu extrahieren</p>
                 </div>
                 
-                <div class="upload-container" id="payslip-upload">
+                <!-- Processing Mode Selection -->
+                <div class="processing-mode-selector">
+                    <h3>Verarbeitungsmodus auswählen:</h3>
+                    <div class="mode-options">
+                        <label>
+                            <input type="radio" name="processing-mode" value="single" checked> 
+                            Einzeldatei-Verarbeitung
+                        </label>
+                        <label>
+                            <input type="radio" name="processing-mode" value="batch">
+                            Stapelverarbeitung (mehrere Dateien)
+                        </label>
+                    </div>
+                </div>
+                
+                <!-- Single File Upload Container -->
+                <div class="upload-container" id="payslip-single-upload">
                     <div class="upload-area" id="payslip-drop-area">
                         <span class="material-icons">cloud_upload</span>
                         <p>Ziehen Sie eine Gehaltsabrechnung hierher oder klicken Sie zum Durchsuchen</p>
-                        <input type="file" id="payslip-file-input" accept=".pdf,.png,.jpg,.jpeg" hidden>
-                    </div>
-                    <button id="payslip-upload-btn" class="upload-btn">Gehaltsabrechnung hochladen</button>
-                </div>
-                
-                <div class="results-container" id="payslip-results">
-                    <div class="loading-indicator" id="payslip-loading">
-                        <div class="spinner"></div>
-                        <p>Gehaltsabrechnung wird verarbeitet...</p>
+                        <input type="file" id="payslip-file-input" accept=".pdf" hidden>
                     </div>
                     
-                    <div class="results-content" id="payslip-content">
-                        <h2>Gehaltsabrechnungs-Analyse</h2>
-                        <div class="results-summary">
-                            <div class="summary-item" id="payslip-status">
-                                <span class="material-icons">info</span>
-                                <span>Daten extrahiert. Bitte geben Sie eine Mitarbeiter-ID ein, um zu validieren.</span>
+                    <!-- Page and Quadrant Specification -->
+                    <div class="page-specification" id="page-specification">
+                        <h3>Optionale Seitenangaben für präzise Extraktion:</h3>
+                        <p class="page-spec-info">Wenn Sie wissen, auf welchen Seiten und in welchen Bereichen die gesuchten Informationen stehen, können Sie die Genauigkeit und Geschwindigkeit erhöhen.</p>
+                        
+                        <div class="specification-section">
+                            <h4>Mitarbeitername:</h4>
+                            <div class="spec-fields">
+                                <div class="spec-field">
+                                    <label for="employee-name-page">Seite:</label>
+                                    <input type="number" id="employee-name-page" min="1" placeholder="z.B. 1">
+                                </div>
+                                <div class="spec-field">
+                                    <label for="employee-name-quadrant">Bereich:</label>
+                                    <select id="employee-name-quadrant">
+                                        <option value="">- Bitte wählen -</option>
+                                        <option value="top_left">Oben links</option>
+                                        <option value="top_right">Oben rechts</option>
+                                        <option value="bottom_left">Unten links</option>
+                                        <option value="bottom_right">Unten rechts</option>
+                                    </select>
+                                </div>
                             </div>
                         </div>
                         
-                        <div class="search-container" id="employee-search">
+                        <div class="specification-section">
+                            <h4>Bruttobetrag:</h4>
+                            <div class="spec-fields">
+                                <div class="spec-field">
+                                    <label for="gross-page">Seite:</label>
+                                    <input type="number" id="gross-page" min="1" placeholder="z.B. 1">
+                                </div>
+                                <div class="spec-field">
+                                    <label for="gross-quadrant">Bereich:</label>
+                                    <select id="gross-quadrant">
+                                        <option value="">- Bitte wählen -</option>
+                                        <option value="top_left">Oben links</option>
+                                        <option value="top_right">Oben rechts</option>
+                                        <option value="bottom_left">Unten links</option>
+                                        <option value="bottom_right">Unten rechts</option>
+                                    </select>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="specification-section">
+                            <h4>Nettobetrag:</h4>
+                            <div class="spec-fields">
+                                <div class="spec-field">
+                                    <label for="net-page">Seite:</label>
+                                    <input type="number" id="net-page" min="1" placeholder="z.B. 1">
+                                </div>
+                                <div class="spec-field">
+                                    <label for="net-quadrant">Bereich:</label>
+                                    <select id="net-quadrant">
+                                        <option value="">- Bitte wählen -</option>
+                                        <option value="top_left">Oben links</option>
+                                        <option value="top_right">Oben rechts</option>
+                                        <option value="bottom_left">Unten links</option>
+                                        <option value="bottom_right">Unten rechts</option>
+                                    </select>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <button id="payslip-upload-btn" class="upload-btn">Gehaltsabrechnung hochladen</button>
+                </div>
+                
+                <!-- Batch Upload Container -->
+                <div class="upload-container" id="payslip-batch-upload" style="display: none;">
+                    <div class="upload-area" id="payslip-batch-drop-area">
+                        <span class="material-icons">cloud_upload</span>
+                        <p>Ziehen Sie mehrere Gehaltsabrechnungen hierher oder klicken Sie zum Durchsuchen</p>
+                        <input type="file" id="payslip-batch-file-input" accept=".pdf" multiple hidden>
+                    </div>
+                    
+                    <div class="batch-info">
+                        <p><strong>Hinweis zur Stapelverarbeitung:</strong> Alle Dateien werden automatisch verarbeitet. Dies kann mehr Zeit in Anspruch nehmen.</p>
+                        <div id="batch-file-list" class="batch-file-list">
+                            <p>Keine Dateien ausgewählt</p>
+                        </div>
+                    </div>
+                    
+                    <button id="payslip-batch-upload-btn" class="upload-btn">Stapel hochladen</button>
+                </div>
+                
+                <div class="loading-indicator" id="payslip-loading">
+                    <div class="spinner"></div>
+                    <p>Verarbeite Dokument...</p>
+                </div>
+                
+                <div class="results-container" id="payslip-results">
+                    <div class="results-content" id="payslip-results-content">
+                        <h2>Extrahierte Informationen</h2>
+                        
+                        <div class="results-summary">
+                            <div class="summary-item info" id="payslip-info">
+                                <span class="material-icons">info</span>
+                                <span>Gehaltsabrechnung verarbeitet</span>
+                            </div>
+                        </div>
+                        
+                        <div class="search-container">
                             <div class="search-field">
                                 <label for="employee-id">Mitarbeiter-ID:</label>
-                                <input type="text" id="employee-id" placeholder="z.B. 12345">
-                                <button id="validate-btn" class="search-btn">Validieren</button>
+                                <input type="text" id="employee-id" placeholder="z.B. EMP001">
                             </div>
-                            <p class="search-info">Geben Sie eine Mitarbeiter-ID ein, um die extrahierten Informationen zu validieren.</p>
+                            <button id="validate-btn" class="search-btn">Validieren</button>
+                            <p class="search-info">Geben Sie eine Mitarbeiter-ID ein, um die extrahierten Informationen zu validieren</p>
                         </div>
-
-                        <div class="results-details">
-                            <div class="detail-section">
-                                <h3>Mitarbeiterinformationen</h3>
-                                <div class="detail-item">
-                                    <span class="detail-match" id="employee-name-match">
-                                        <span class="material-icons">pending</span>
-                                    </span>
-                                    <span class="detail-label">Name:</span>
-                                    <span class="detail-value" id="employee-name"></span>
-                                    <span class="detail-expected" id="employee-name-expected"></span>
+                        
+                        <div class="results-summary">
+                            <div class="summary-item" id="payslip-status">
+                                <span class="material-icons">pending</span>
+                                <span>Warte auf Validierung...</span>
+                            </div>
+                        </div>
+                        
+                        <!-- For single file results -->
+                        <div id="single-file-results">
+                            <div class="results-details">
+                                <div class="detail-section">
+                                    <h3>Mitarbeiterinformationen</h3>
+                                    <div class="detail-item">
+                                        <span class="detail-match" id="employee-name-match">
+                                            <span class="material-icons">pending</span>
+                                        </span>
+                                        <span class="detail-label">Name:</span>
+                                        <span class="detail-value" id="employee-name"></span>
+                                        <span class="detail-expected" id="employee-name-expected"></span>
+                                    </div>
+                                </div>
+                                
+                                <div class="detail-section">
+                                    <h3>Finanzielle Details</h3>
+                                    <div class="detail-item">
+                                        <span class="detail-match" id="gross-amount-match">
+                                            <span class="material-icons">pending</span>
+                                        </span>
+                                        <span class="detail-label">Bruttobetrag:</span>
+                                        <span class="detail-value" id="gross-amount"></span>
+                                        <span class="detail-expected" id="gross-amount-expected"></span>
+                                    </div>
+                                    <div class="detail-item">
+                                        <span class="detail-match" id="net-amount-match">
+                                            <span class="material-icons">pending</span>
+                                        </span>
+                                        <span class="detail-label">Nettobetrag:</span>
+                                        <span class="detail-value" id="net-amount"></span>
+                                        <span class="detail-expected" id="net-amount-expected"></span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- For batch results -->
+                        <div id="batch-results" style="display: none;">
+                            <div class="batch-summary">
+                                <div class="batch-stat">
+                                    <span class="batch-label">Gesamt:</span>
+                                    <span class="batch-value" id="batch-total">0</span>
+                                </div>
+                                <div class="batch-stat">
+                                    <span class="batch-label">Erfolgreich:</span>
+                                    <span class="batch-value" id="batch-success">0</span>
+                                </div>
+                                <div class="batch-stat">
+                                    <span class="batch-label">Fehler:</span>
+                                    <span class="batch-value" id="batch-error">0</span>
                                 </div>
                             </div>
                             
-                            <div class="detail-section">
-                                <h3>Zahlungsinformationen</h3>
-                                <div class="detail-item">
-                                    <span class="detail-match" id="payment-gross-match">
-                                        <span class="material-icons">pending</span>
-                                    </span>
-                                    <span class="detail-label">Bruttogehalt:</span>
-                                    <span class="detail-value" id="payment-gross"></span>
-                                    <span class="detail-expected" id="payment-gross-expected"></span>
-                                </div>
-                                <div class="detail-item">
-                                    <span class="detail-match" id="payment-net-match">
-                                        <span class="material-icons">pending</span>
-                                    </span>
-                                    <span class="detail-label">Nettogehalt:</span>
-                                    <span class="detail-value" id="payment-net"></span>
-                                    <span class="detail-expected" id="payment-net-expected"></span>
-                                </div>
+                            <div class="batch-results-table">
+                                <table>
+                                    <thead>
+                                        <tr>
+                                            <th>Datei</th>
+                                            <th>Name</th>
+                                            <th>Brutto</th>
+                                            <th>Netto</th>
+                                            <th>Status</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="batch-results-body">
+                                        <!-- Results will be inserted here -->
+                                    </tbody>
+                                </table>
                             </div>
                         </div>
                     </div>
@@ -121,28 +316,15 @@
                     <button id="property-upload-btn" class="upload-btn">Immobilienangebot hochladen</button>
                 </div>
                 
+                <div class="loading-indicator" id="property-loading">
+                    <div class="spinner"></div>
+                    <p>Verarbeite Dokument...</p>
+                </div>
+                
                 <div class="results-container" id="property-results">
-                    <div class="loading-indicator" id="property-loading">
-                        <div class="spinner"></div>
-                        <p>Immobilienangebot wird verarbeitet...</p>
-                    </div>
-                    
-                    <div class="results-content" id="property-content">
-                        <h2>Immobilienangebots-Analyse</h2>
-                        
-                        <div class="results-details">
-                            <div class="detail-section">
-                                <h3>Immobilieninformationen</h3>
-                                <div class="detail-item">
-                                    <span class="detail-label">Wohnfläche:</span>
-                                    <span class="detail-value" id="property-space"></span>
-                                </div>
-                                <div class="detail-item">
-                                    <span class="detail-label">Kaufpreis:</span>
-                                    <span class="detail-value" id="property-price"></span>
-                                </div>
-                            </div>
-                        </div>
+                    <div class="results-content">
+                        <h2>Extrahierte Informationen</h2>
+                        <p>Diese Funktion ist noch in Entwicklung.</p>
                     </div>
                 </div>
             </div>
