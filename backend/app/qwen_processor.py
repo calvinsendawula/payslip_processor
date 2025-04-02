@@ -444,7 +444,7 @@ class QwenVLProcessor:
     # Alias for backward compatibility
     process_pdf = process_pdf_file
     
-    def process_pdf_with_pages(self, pdf_bytes, file_name=None, pages=None):
+    def process_pdf_with_pages(self, pdf_bytes, file_name=None, pages=None, selected_windows=None, override_global_settings=None):
         """
         Process specific pages of a PDF with page-specific configurations
         
@@ -452,6 +452,8 @@ class QwenVLProcessor:
             pdf_bytes: PDF file content as bytes
             file_name: Name of the file (optional)
             pages: List of page numbers to process (1-indexed)
+            selected_windows: List or string of specific windows to use (overrides config)
+            override_global_settings: When "true", forces the selected_windows to override global settings
             
         Returns:
             Dict containing extracted data
@@ -482,11 +484,15 @@ class QwenVLProcessor:
                 
                 # Window and processing parameters
                 "window_mode": global_config.get("mode") or processing_config.get("window_mode"),
-                "selected_windows": global_config.get("selected_windows") or processing_config.get("selected_windows"),
+                # Use explicitly provided selected_windows parameter if available
+                "selected_windows": selected_windows or global_config.get("selected_windows") or processing_config.get("selected_windows"),
                 "custom_prompts": custom_prompts,
                 "force_cpu": global_config.get("force_cpu") or processing_config.get("force_cpu"),
                 "gpu_memory_fraction": global_config.get("gpu_memory_fraction") or processing_config.get("gpu_memory_fraction"),
                 "memory_isolation": processing_config.get("memory_isolation"),
+                
+                # Add override_global_settings parameter if provided
+                "override_global_settings": override_global_settings,
                 
                 # PDF parameters
                 "pdf_dpi": pdf_config.get("dpi"),

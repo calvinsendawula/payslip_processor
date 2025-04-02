@@ -238,6 +238,133 @@ For processing new payslip formats, provide:
 - Requires prompt engineering for new formats
 - GPU required for practical use
 
+## Docker Container
+
+The application can be run as a Docker container, which provides a pre-packaged environment with all dependencies and model files included.
+
+### Building the Docker Container
+
+```bash
+# Navigate to the docker directory
+cd pypi_package/docker
+
+# On Windows
+.\build_docker.ps1
+
+# On Linux/macOS
+./build_docker.sh
+```
+
+The build process downloads all required model files and packages them into the Docker image, resulting in a ready-to-use container.
+
+### Running the Docker Container
+
+The Docker container can be run in different modes:
+
+1. **Basic run (uses CPU by default):**
+   ```bash
+   docker run -d -p 27842:27842 --name qwen-processor qwen-payslip-processor:latest
+   ```
+
+2. **Run with GPU support (if available):**
+   ```bash
+   docker run -d -p 27842:27842 --gpus all -e FORCE_CPU=false --name qwen-processor qwen-payslip-processor:latest
+   ```
+
+3. **Run with customized default settings:**
+   ```bash
+   docker run -d -p 27842:27842 --name qwen-processor \
+     -e FORCE_CPU=false \
+     -v your-configs:/app/configs \
+     qwen-payslip-processor:latest
+   ```
+
+### Parameter Overriding
+
+Even when running with default settings, you can override parameters at runtime by passing them in the API requests. For example, to use GPU processing for a specific request even when the container is running in CPU mode:
+
+```json
+{
+  "file_path": "path/to/file.pdf",
+  "force_cpu": false
+}
+```
+
+### Docker Container API
+
+The Docker container exposes an API endpoint at port 27842:
+
+- **Endpoint:** `http://localhost:27842/process`
+- **Method:** POST
+- **Parameters:**
+  - **Basic Settings:**
+    - `file_path`: Path to the PDF or image file to process
+    - `window_mode`: Processing mode ("vertical", "horizontal", or "custom")
+    - `selected_windows`: Windows to process (e.g., ["top", "bottom"])
+    - `memory_isolation`: Whether to isolate memory for each window ("true" or "false")
+    - `force_cpu`: Boolean to override the default CPU/GPU setting
+    - `gpu_memory_fraction`: Fraction of GPU memory to use (e.g., 0.8)
+    - `pages`: Page range to process (e.g., "1-3,5,7")
+  
+  - **PDF Settings:**
+    - `pdf_dpi`: DPI for PDF rendering (e.g., 450)
+  
+  - **Image Settings:**
+    - `image_resolution_steps`: List of resolutions to try (e.g., [1200, 1000, 800])
+    - `image_enhance_contrast`: Whether to enhance image contrast
+    - `image_sharpen_factor`: Factor for image sharpening
+    - `image_contrast_factor`: Factor for contrast adjustment
+    - `image_brightness_factor`: Factor for brightness adjustment
+    - `image_ocr_language`: Language for OCR (e.g., "deu")
+    - `image_ocr_threshold`: Threshold for OCR recognition
+  
+  - **Window Settings:**
+    - `window_overlap`: Overlap percentage for windows (0.0-1.0)
+    - `window_min_size`: Minimum window size in pixels
+  
+  - **Text Generation Settings:**
+    - `text_generation_max_new_tokens`: Maximum new tokens to generate
+    - `text_generation_use_beam_search`: Whether to use beam search
+    - `text_generation_num_beams`: Number of beams for beam search
+    - `text_generation_temperature`: Temperature for text generation
+    - `text_generation_top_p`: Top-p value for sampling
+  
+  - **Extraction Settings:**
+    - `extraction_confidence_threshold`: Confidence threshold for extraction
+    - `extraction_fuzzy_matching`: Whether to use fuzzy matching
+  
+  - **Custom Prompts:**
+    - `prompt_top`: Custom prompt for top window
+    - `prompt_bottom`: Custom prompt for bottom window
+    - `prompt_left`: Custom prompt for left window
+    - `prompt_right`: Custom prompt for right window
+    - `prompt_top_left`: Custom prompt for top-left window
+    - `prompt_top_right`: Custom prompt for top-right window
+    - `prompt_bottom_left`: Custom prompt for bottom-left window
+    - `prompt_bottom_right`: Custom prompt for bottom-right window
+    - `prompt_whole`: Custom prompt for whole image
+
+### Configuration Management
+
+The Docker container also provides endpoints for managing configurations:
+
+- **Save Configuration:**
+  - **Endpoint:** `http://localhost:27842/config`
+  - **Method:** POST
+  - **Body:** JSON object with configuration settings and a `name` field
+
+- **List Configurations:**
+  - **Endpoint:** `http://localhost:27842/configs`
+  - **Method:** GET
+
+- **Get Configuration:**
+  - **Endpoint:** `http://localhost:27842/config/{name}`
+  - **Method:** GET
+
+- **Delete Configuration:**
+  - **Endpoint:** `http://localhost:27842/config/{name}`
+  - **Method:** DELETE
+
 ## Overview
 
 This application provides a complete solution for:

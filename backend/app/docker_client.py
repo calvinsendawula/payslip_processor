@@ -556,10 +556,13 @@ class QwenDockerClient:
             
         # Add selected windows if provided
         if selected_windows is not None:
+            # If selected_windows is a list, join it to a string
             if isinstance(selected_windows, list):
-                data['selected_windows'] = ','.join(selected_windows)
-            else:
-                data['selected_windows'] = selected_windows
+                selected_windows = ",".join(selected_windows)
+            data['selected_windows'] = selected_windows
+            # When selected_windows is explicitly provided, always override global settings
+            data['override_global_settings'] = 'true'
+            logger.info(f"User-specified windows provided: {selected_windows}, enabling override_global_settings")
         
         # Add memory isolation if provided
         if memory_isolation is not None:
@@ -689,16 +692,15 @@ class QwenDockerClient:
         if global_prompt is not None:
             data['global_prompt'] = global_prompt
             
+        # Add global_selected_windows if provided
         if global_selected_windows is not None:
-            if isinstance(global_selected_windows, list):
-                data['global_selected_windows'] = ','.join(global_selected_windows)
-            else:
-                data['global_selected_windows'] = global_selected_windows
-                
-        # Add override_global_settings if provided
-        if override_global_settings is not None:
+            data['global_selected_windows'] = global_selected_windows
+        
+        # Add override_global_settings if provided (but don't overwrite if already set above)
+        if override_global_settings is not None and 'override_global_settings' not in data:
+            # ensure it's a string
             data['override_global_settings'] = str(override_global_settings).lower()
-            
+        
         # Add full config if provided
         if full_config is not None:
             # FIXED: Parse resolution_steps to ensure they are integers before sending
@@ -840,7 +842,12 @@ class QwenDockerClient:
                 data['selected_windows'] = ','.join(selected_windows)
             else:
                 data['selected_windows'] = selected_windows
-         
+            
+            # Force override_global_settings to true when selected_windows is explicitly provided
+            # This ensures user-specified window selections take precedence over global settings
+            data['override_global_settings'] = 'true'
+            logger.info(f"Selected windows explicitly provided: {selected_windows}. Forcing override_global_settings=true")
+        
         # Add memory isolation if provided
         if memory_isolation is not None:
             data['memory_isolation'] = memory_isolation

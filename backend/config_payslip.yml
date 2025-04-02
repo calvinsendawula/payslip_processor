@@ -4,7 +4,7 @@
 docker:
   host: "localhost"
   port: 27842
-  timeout: 60  # Increased timeout for processing
+  timeout: 1200  # Increased timeout for processing (20 minutes)
 
 # Processing Settings
 processing:
@@ -14,8 +14,8 @@ processing:
     - "top"
     - "bottom"
   force_cpu: false  # Keep GPU processing enabled
-  memory_isolation: "none"  # No memory isolation
-  gpu_memory_fraction: 0.9  # Use 90% of available GPU memory
+  memory_isolation: "none"  # No memory isolation to prevent OOM issues
+  gpu_memory_fraction: 0.7  # Reduced from 0.9 to help with CUDA OOM issues
 
 # Global Configuration (applies to all pages only when no specific settings are provided)
 global:
@@ -229,11 +229,11 @@ extraction:
 
 # PDF Processing Settings
 pdf:
-  dpi: 350  # Reduced DPI to save memory
+  dpi: 350  # Further reduced DPI to save memory
 
 # Image Processing Settings
 image:
-  resolution_steps: [600, 400]  # Fixed to explicitly use a list of integers
+  resolution_steps: [800, 650]  # Reduced resolution steps to use less memory
   enhance_contrast: true
   sharpen_factor: 2.0
   contrast_factor: 1.5
@@ -251,8 +251,14 @@ window:
 
 # Text Generation Settings
 text_generation:
-  max_new_tokens: 768
-  use_beam_search: false
-  num_beams: 1
-  temperature: 0.1
-  top_p: 0.95 
+  max_new_tokens: 768  # Limit maximum tokens generated
+  use_beam_search: false  # Use greedy decoding instead of beam search
+  temperature: 0.3  # Lower temperature for more focused responses
+  top_p: 0.9  # Nucleus sampling parameter
+
+# Window Settings
+window:
+  window_mode: vertical
+  overlap: 0.1  # Renamed from window_overlap
+  min_size: 100  # Renamed from window_min_size
+  selected_windows: [top, bottom] 

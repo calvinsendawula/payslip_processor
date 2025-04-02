@@ -393,7 +393,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 `<span class="material-icons">error</span><span>${error.message || "Fehler bei der Validierung"}</span>`;
             statusElement.className = 'summary-item error';
         });
-    }
+    });
     
     // Update UI with validation results (new)
     function updateValidationResults(data) {
@@ -674,8 +674,8 @@ document.addEventListener('DOMContentLoaded', function() {
                             element.textContent = '';
                         }
                     }
+                });
         });
-    });
         } else if (processingMode.value === 'batch') {
             // Get batch file input
             const batchFileInput = document.getElementById('payslip-batch-file-input');
@@ -724,6 +724,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 displayBatchResults(data);
             })
             .catch(error => {
+                console.error('Batch upload error:', error);
                 if (payslipLoading) payslipLoading.style.display = 'none';
                 if (payslipContent) payslipContent.style.display = 'block';
                 

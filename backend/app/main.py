@@ -357,11 +357,13 @@ async def extract_payslip_single(
                 # Add to processor config
                 processor.config["pages"] = page_configs
                 
-                # Process the specific page
+                # Process the specific page with explicit override of global settings
                 partial_result = processor.process_pdf_with_pages(
                     pdf_bytes=file_content,
                     file_name=file.filename,
-                    pages=[employee_name_page]
+                    pages=[employee_name_page],
+                    selected_windows=extraction_selected_windows,
+                    override_global_settings="true" if extraction_selected_windows else None
                 )
                 
                 # Extract employee name and add to results
@@ -405,11 +407,13 @@ async def extract_payslip_single(
                 # Add to processor config
                 processor.config["pages"] = page_configs
                 
-                # Process the specific page
+                # Process the specific page with explicit override of global settings
                 partial_result = processor.process_pdf_with_pages(
                     pdf_bytes=file_content,
                     file_name=file.filename,
-                    pages=[gross_page]
+                    pages=[gross_page],
+                    selected_windows=extraction_selected_windows,
+                    override_global_settings="true" if extraction_selected_windows else None
                 )
                 
                 # Extract gross amount and add to results
@@ -453,11 +457,13 @@ async def extract_payslip_single(
                 # Add to processor config
                 processor.config["pages"] = page_configs
                 
-                # Process the specific page
+                # Process the specific page with explicit override of global settings
                 partial_result = processor.process_pdf_with_pages(
                     pdf_bytes=file_content,
                     file_name=file.filename,
-                    pages=[net_page]
+                    pages=[net_page],
+                    selected_windows=extraction_selected_windows,
+                    override_global_settings="true" if extraction_selected_windows else None
                 )
                 
                 # Extract net amount and add to results
@@ -489,8 +495,13 @@ async def extract_payslip_single(
             }
             
             # Select appropriate windows based on window_mode
+            selected_windows = None
             if window_mode in valid_windows:
-                processor.config["processing"]["selected_windows"] = valid_windows[window_mode]
+                selected_windows = valid_windows[window_mode]
+                processor.config["processing"]["selected_windows"] = selected_windows
+            
+            # Set override_global_settings to true to ensure our window mode is respected
+            processor.config["processing"]["override_global_settings"] = True
             
             # If using quadrant mode, ensure global settings don't override
             if window_mode == "quadrant":
@@ -507,6 +518,7 @@ async def extract_payslip_single(
                     
                     logger.info("Completely replaced global settings to ensure quadrant mode is used")
             
+            # Set override_global_settings parameter explicitly when calling process_pdf_file
             extracted_data = processor.process_pdf_file(
                 pdf_bytes=file_content,
                 file_name=file.filename
@@ -558,8 +570,13 @@ async def extract_payslip_batch(
         }
         
         # Select appropriate windows based on window_mode
+        selected_windows = None
         if window_mode in valid_windows:
-            processor.config["processing"]["selected_windows"] = valid_windows[window_mode]
+            selected_windows = valid_windows[window_mode]
+            processor.config["processing"]["selected_windows"] = selected_windows
+            
+        # Set override_global_settings to true to ensure our window mode is respected
+        processor.config["processing"]["override_global_settings"] = True
             
         # Set memory isolation if provided
         if memory_isolation is not None:
@@ -573,7 +590,7 @@ async def extract_payslip_batch(
             # Replace global settings to prevent conflicts with our explicit selection
             processor.config["global"] = {
                 "mode": window_mode,
-                "selected_windows": valid_windows[window_mode]
+                "selected_windows": selected_windows
             }
             # Keep any existing prompt instructions if present
             if "prompt_instructions" in processor.config.get("global", {}):
