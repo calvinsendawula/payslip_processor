@@ -1,4 +1,298 @@
+// Tab switching functionality
+function showTab(tabName) {
+    // Hide all tab contents
+    const tabContents = document.querySelectorAll('.tab-content');
+    tabContents.forEach(tab => tab.classList.remove('active'));
+    
+    // Show the selected tab content
+    const selectedTab = document.getElementById(`${tabName}-tab`);
+    if (selectedTab) {
+        selectedTab.classList.add('active');
+    } else {
+        console.error(`Tab content with ID '${tabName}-tab' not found`);
+    }
+    
+    // Update navigation items
+    const navItems = document.querySelectorAll('.nav-item');
+    navItems.forEach(nav => {
+        if (nav.getAttribute('data-tab') === tabName) {
+            nav.classList.add('active');
+        } else {
+            nav.classList.remove('active');
+        }
+    });
+}
+
 document.addEventListener('DOMContentLoaded', function() {
+    // Docker container status check
+    const dockerStatusIndicator = document.getElementById('docker-status-indicator');
+    const dockerStatusText = document.getElementById('docker-status-text');
+    
+    // Processing mode selection
+    const processingModeRadios = document.querySelectorAll('input[name="processing-mode"]');
+    const singleUploadContainer = document.getElementById('payslip-single-upload');
+    const batchUploadContainer = document.getElementById('payslip-batch-upload');
+    const singleFileResults = document.getElementById('single-file-results');
+    const batchResults = document.getElementById('batch-results');
+    
+    // Handle processing mode changes
+    processingModeRadios.forEach(radio => {
+        radio.addEventListener('change', function() {
+            if (this.value === 'single') {
+                singleUploadContainer.style.display = 'block';
+                batchUploadContainer.style.display = 'none';
+                if (document.getElementById('payslip-results').style.display === 'block') {
+                    singleFileResults.style.display = 'block';
+                    batchResults.style.display = 'none';
+                }
+            } else if (this.value === 'batch') {
+                singleUploadContainer.style.display = 'none';
+                batchUploadContainer.style.display = 'block';
+                if (document.getElementById('payslip-results').style.display === 'block') {
+                    singleFileResults.style.display = 'none';
+                    batchResults.style.display = 'block';
+                }
+            }
+        });
+    });
+    
+    // Check container status immediately and periodically
+    checkContainerStatus();
+    setInterval(checkContainerStatus, 10000); // Check every 10 seconds
+    
+    function checkContainerStatus() {
+        // Show loading indicator
+        dockerStatusIndicator.className = 'status-indicator loading';
+        dockerStatusText.textContent = 'Checking Docker status...';
+
+        // Call the API to check container status
+        fetch('/api/container-status')
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error(`HTTP error! Status: ${response.status}`);
+                }
+                return response.json();
+            })
+            .then(data => {
+                const statusIndicator = document.getElementById('docker-status-indicator');
+                const statusText = document.getElementById('docker-status-text');
+                const restartButton = document.getElementById('restart-container-button');
+                
+                // First check if backend is available
+                if (data.hasOwnProperty('backend_available') && !data.backend_available) {
+                    // Backend is not available
+                    statusIndicator.className = 'status-indicator error';
+                    statusText.textContent = 'Error connecting to backend server';
+                    if (restartButton) {
+                        restartButton.style.display = 'none';
+                    }
+                    disableFormInputs();
+                    return;
+                }
+                
+                // Accept 'running' or 'ok' status values
+                if (data.status === 'running' || data.status === 'ok') {
+                    statusIndicator.className = 'status-indicator online';
+                    statusText.textContent = 'Docker container running';
+                    
+                    // Show model info if available
+                    if (data.model) {
+                        statusText.textContent += ` (${data.model})`;
+                    }
+                    
+                    // Show GPU status if available
+                    if (data.gpu_available) {
+                        const gpuBadge = document.createElement('span');
+                        gpuBadge.className = data.using_gpu ? 'gpu-badge gpu-enabled' : 'gpu-badge gpu-disabled';
+                        gpuBadge.textContent = data.using_gpu ? 'GPU ENABLED' : 'GPU NOT USED';
+                        statusText.appendChild(document.createTextNode(' '));
+                        statusText.appendChild(gpuBadge);
+                        
+                        // Show restart button if GPU is available but not used
+                        if (!data.using_gpu) {
+                            if (restartButton) {
+                            restartButton.style.display = 'inline-block';
+                            }
+                        } else {
+                            if (restartButton) {
+                            restartButton.style.display = 'none';
+                            }
+                        }
+                    } else {
+                        if (restartButton) {
+                        restartButton.style.display = 'none';
+                        }
+                    }
+                    
+                    // Enable form inputs
+                    enableFormInputs();
+                } else if (data.status === 'initializing') {
+                    statusIndicator.className = 'status-indicator initializing';
+                    statusText.textContent = 'Docker container starting...';
+                    if (restartButton) {
+                    restartButton.style.display = 'none';
+                    }
+                    
+                    // Try again in 5 seconds
+                    setTimeout(checkContainerStatus, 5000);
+                    
+                    // Disable form inputs
+                    disableFormInputs();
+                } else if (data.status === 'stopped') {
+                    statusIndicator.className = 'status-indicator offline';
+                    statusText.textContent = 'Docker container is stopped';
+                    if (restartButton) {
+                    restartButton.style.display = 'none';
+                    }
+                    
+                    // Disable form inputs
+                    disableFormInputs();
+                } else if (data.status === 'not_found') {
+                    statusIndicator.className = 'status-indicator offline';
+                    statusText.textContent = 'Docker container not found';
+                    if (restartButton) {
+                    restartButton.style.display = 'none';
+                    }
+                    
+                    // Disable form inputs
+                    disableFormInputs();
+                } else {
+                    // Any other status is treated as an error
+                    statusIndicator.className = 'status-indicator error';
+                    statusText.textContent = data.message || 'Error checking Docker status';
+                    if (restartButton) {
+                    restartButton.style.display = 'none';
+                    }
+                    
+                    // Disable form inputs
+                    disableFormInputs();
+                }
+            })
+            .catch(error => {
+                console.error('Error checking container status:', error);
+                const statusIndicator = document.getElementById('docker-status-indicator');
+                const statusText = document.getElementById('docker-status-text');
+                
+                statusIndicator.className = 'status-indicator error';
+                statusText.textContent = 'Error connecting to backend';
+                
+                // Disable form inputs
+                disableFormInputs();
+            });
+    }
+    
+    function restartContainerWithGPU() {
+        // Show loading state
+        const restartButton = document.getElementById('restart-container-button');
+        const originalText = restartButton.textContent;
+        restartButton.textContent = 'Restarting...';
+        restartButton.disabled = true;
+        
+        // Update status indicator
+        const statusIndicator = document.getElementById('docker-status-indicator');
+        const statusText = document.getElementById('docker-status-text');
+        statusIndicator.className = 'status-indicator initializing';
+        statusText.textContent = 'Restarting Docker container with GPU support...';
+        
+        // Call API to restart container
+        fetch('/api/restart-container-with-gpu', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({})
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.status === 'success') {
+                // Container is restarting, poll status
+                statusText.textContent = 'Container restarting with GPU... ';
+                
+                // Poll status every 5 seconds
+                const checkStatus = () => {
+                    fetch('/api/container-status')
+                        .then(response => response.json())
+                        .then(statusData => {
+                            if (statusData.status === 'running') {
+                                // Container is up, check if GPU is enabled
+                                if (statusData.using_gpu) {
+                                    statusIndicator.className = 'status-indicator online';
+                                    statusText.textContent = 'Docker container running with GPU';
+                                    restartButton.style.display = 'none';
+                                    enableFormInputs();
+                                } else {
+                                    // Container is running but not using GPU
+                                    statusIndicator.className = 'status-indicator warning';
+                                    statusText.textContent = 'Docker container running, but still not using GPU';
+                                    restartButton.textContent = originalText;
+                                    restartButton.disabled = false;
+                                    enableFormInputs();
+                                }
+                            } else if (statusData.status === 'initializing') {
+                                // Container still starting, check again
+                                statusIndicator.className = 'status-indicator initializing';
+                                statusText.textContent = 'Container still starting...';
+                                setTimeout(checkStatus, 5000);
+                            } else {
+                                // Container in other state
+                                statusIndicator.className = 'status-indicator warning';
+                                statusText.textContent = `Container in unexpected state: ${statusData.status}`;
+                                restartButton.textContent = originalText;
+                                restartButton.disabled = false;
+                            }
+                        })
+                        .catch(error => {
+                            console.error('Error checking status during restart:', error);
+                            statusIndicator.className = 'status-indicator error';
+                            statusText.textContent = 'Error checking container status';
+                            restartButton.textContent = originalText;
+                            restartButton.disabled = false;
+                        });
+                };
+                
+                // Start polling
+                setTimeout(checkStatus, 5000);
+                
+            } else {
+                // Error restarting
+                statusIndicator.className = 'status-indicator error';
+                statusText.textContent = `Error restarting container: ${data.message}`;
+                restartButton.textContent = originalText;
+                restartButton.disabled = false;
+            }
+        })
+        .catch(error => {
+            console.error('Error restarting container:', error);
+            statusIndicator.className = 'status-indicator error';
+            statusText.textContent = 'Error communicating with backend';
+            restartButton.textContent = originalText;
+            restartButton.disabled = false;
+        });
+    }
+    
+    // Enable or disable form inputs based on container status
+    function enableFormInputs() {
+        const uploadForms = document.querySelectorAll('.upload-form');
+        uploadForms.forEach(form => {
+            const inputs = form.querySelectorAll('input, button, select');
+            inputs.forEach(input => {
+                input.disabled = false;
+            });
+        });
+    }
+
+    function disableFormInputs() {
+        const uploadForms = document.querySelectorAll('.upload-form');
+        uploadForms.forEach(form => {
+            const inputs = form.querySelectorAll('input, button, select');
+            inputs.forEach(input => {
+                if (input.id !== 'restart-container-button') {
+                    input.disabled = true;
+                }
+            });
+        });
+    }
+    
     // Tab switching
     const navItems = document.querySelectorAll('.nav-item');
     const tabContents = document.querySelectorAll('.tab-content');
@@ -27,7 +321,7 @@ document.addEventListener('DOMContentLoaded', function() {
     const payslipUploadBtn = document.getElementById('payslip-upload-btn');
     const payslipResults = document.getElementById('payslip-results');
     const payslipLoading = document.getElementById('payslip-loading');
-    const payslipContent = document.getElementById('payslip-content');
+    const payslipContent = document.getElementById('payslip-results-content');
     
     // Employee Search Functionality (new)
     const employeeSearch = document.getElementById('employee-search');
@@ -130,10 +424,10 @@ document.addEventListener('DOMContentLoaded', function() {
         const statusElement = document.getElementById('payslip-status');
         const nameMatch = document.getElementById('employee-name-match');
         const nameExpected = document.getElementById('employee-name-expected');
-        const grossMatch = document.getElementById('payment-gross-match');
-        const grossExpected = document.getElementById('payment-gross-expected');
-        const netMatch = document.getElementById('payment-net-match');
-        const netExpected = document.getElementById('payment-net-expected');
+        const grossMatch = document.getElementById('gross-amount-match');
+        const grossExpected = document.getElementById('gross-amount-expected');
+        const netMatch = document.getElementById('net-amount-match');
+        const netExpected = document.getElementById('net-amount-expected');
         
         // Check if employee was found
         if (data.employeeFound) {
@@ -217,12 +511,17 @@ document.addEventListener('DOMContentLoaded', function() {
         currentExtractedData = data;
         
         // Display the extracted data
-        document.getElementById('employee-name').textContent = data.employee.name || '';
-        document.getElementById('payment-gross').textContent = data.payment.gross || '';
-        document.getElementById('payment-net').textContent = data.payment.net || '';
+        const employeeNameEl = document.getElementById('employee-name');
+        const grossAmountEl = document.getElementById('gross-amount');
+        const netAmountEl = document.getElementById('net-amount');
+        
+        if (employeeNameEl) employeeNameEl.textContent = data.employee.name || '';
+        if (grossAmountEl) grossAmountEl.textContent = data.payment.gross || '';
+        if (netAmountEl) netAmountEl.textContent = data.payment.net || '';
         
         // Display processing time if available
         const statusElement = document.getElementById('payslip-status');
+        if (statusElement) {
         if (data.processing_time) {
             statusElement.innerHTML = 
                 `<span class="material-icons">check_circle</span><span>Verarbeitung abgeschlossen in ${data.processing_time}</span>`;
@@ -231,23 +530,31 @@ document.addEventListener('DOMContentLoaded', function() {
             statusElement.innerHTML = 
                 `<span class="material-icons">check_circle</span><span>Verarbeitung abgeschlossen</span>`;
             statusElement.className = 'summary-item success';
+            }
         }
         
         // Set all indicators to pending state
         const nameMatch = document.getElementById('employee-name-match');
-        const grossMatch = document.getElementById('payment-gross-match');
-        const netMatch = document.getElementById('payment-net-match');
+        const grossMatch = document.getElementById('gross-amount-match');
+        const netMatch = document.getElementById('net-amount-match');
         
+        if (nameMatch) {
         nameMatch.innerHTML = '<span class="material-icons">pending</span>';
         nameMatch.className = 'detail-match match-pending';
+        }
         
+        if (grossMatch) {
         grossMatch.innerHTML = '<span class="material-icons">pending</span>';
         grossMatch.className = 'detail-match match-pending';
+        }
         
+        if (netMatch) {
         netMatch.innerHTML = '<span class="material-icons">pending</span>';
         netMatch.className = 'detail-match match-pending';
+        }
         
         // Show the employee search container
+        const employeeSearch = document.querySelector('.search-container');
         if (employeeSearch) {
             employeeSearch.style.display = 'block';
         }
@@ -264,22 +571,72 @@ document.addEventListener('DOMContentLoaded', function() {
         const formData = new FormData();
         formData.append('file', file);
         
-        // Show loading state
-        payslipResults.style.display = 'block';
-        payslipLoading.style.display = 'block';
-        payslipContent.style.display = 'none';
+        // Get references to DOM elements and check if they exist
+        const payslipResults = document.getElementById('payslip-results');
+        const payslipLoading = document.getElementById('payslip-loading');
+        const payslipContent = document.getElementById('payslip-results-content');
+        
+        // Show loading state - using optional chaining to avoid errors
+        if (payslipResults) payslipResults.style.display = 'block';
+        if (payslipLoading) payslipLoading.style.display = 'block';
+        if (payslipContent) payslipContent.style.display = 'none';
         
         // Reset the employee search if it was previously displayed
+        const employeeSearch = document.querySelector('.search-container');
+        const employeeIdInput = document.getElementById('employee-id');
+        
         if (employeeSearch) {
             employeeSearch.style.display = 'none';
+        }
+        if (employeeIdInput) {
             employeeIdInput.value = '';
         }
         
         // Define the statusElement variable that was missing
         const statusElement = document.getElementById('payslip-status');
         
+        // Get processing mode
+        const processingMode = document.querySelector('input[name="processing-mode"]:checked');
+        
+        // Default to single file processing if no mode is selected
+        if (!processingMode || processingMode.value === 'single') {
+            // Check if specific page/quadrant info was provided
+            const employeeNamePageInput = document.getElementById('employee-name-page');
+            const employeeNameQuadrantSelect = document.getElementById('employee-name-quadrant');
+            const grossPageInput = document.getElementById('gross-page');
+            const grossQuadrantSelect = document.getElementById('gross-quadrant');
+            const netPageInput = document.getElementById('net-page');
+            const netQuadrantSelect = document.getElementById('net-quadrant');
+            
+            const hasPageInfo = employeeNamePageInput && employeeNamePageInput.value || 
+                              grossPageInput && grossPageInput.value || 
+                              netPageInput && netPageInput.value;
+            
+            let endpoint = '/upload-payslip';
+            
+            // If page/quadrant info is provided, use the specific endpoint
+            if (hasPageInfo) {
+                endpoint = '/upload-payslip-single';
+                
+                // Add page and quadrant information if provided
+                if (employeeNamePageInput.value) {
+                    formData.append('employee_name_page', employeeNamePageInput.value);
+                    formData.append('employee_name_quadrant', employeeNameQuadrantSelect.value || 'full');
+                }
+                
+                if (grossPageInput.value) {
+                    formData.append('gross_page', grossPageInput.value);
+                    formData.append('gross_quadrant', grossQuadrantSelect.value || 'full');
+                }
+                
+                if (netPageInput.value) {
+                    formData.append('net_page', netPageInput.value);
+                    formData.append('net_quadrant', netQuadrantSelect.value || 'full');
+                }
+            }
+        
         // Send to backend for extraction only (not validation)
-        fetch('/upload-payslip', {
+            fetch(endpoint, {
             method: 'POST',
             body: formData
         })
@@ -293,33 +650,175 @@ document.addEventListener('DOMContentLoaded', function() {
         })
         .then(data => {
             // Hide loading, show results
-            payslipLoading.style.display = 'none';
-            payslipContent.style.display = 'block';
+                if (payslipLoading) payslipLoading.style.display = 'none';
+                if (payslipContent) payslipContent.style.display = 'block';
+                
+                // Make sure the single file results are displayed
+                if (document.getElementById('single-file-results')) {
+                    document.getElementById('single-file-results').style.display = 'block';
+                }
+                if (document.getElementById('batch-results')) {
+                    document.getElementById('batch-results').style.display = 'none';
+                }
             
             // Display the extracted data
             displayExtractedData(data);
         })
         .catch(error => {
-            payslipLoading.style.display = 'none';
-            payslipContent.style.display = 'block';
+                if (payslipLoading) payslipLoading.style.display = 'none';
+                if (payslipContent) payslipContent.style.display = 'block';
             
             // Show error message
+                if (statusElement) {
             statusElement.innerHTML = 
                 `<span class="material-icons">error</span><span>${error.message || "Fehler bei der Verarbeitung der Gehaltsabrechnung"}</span>`;
             statusElement.className = 'summary-item error';
+                }
             
             // Clear other fields
-            document.getElementById('employee-name').textContent = '';
-            document.getElementById('employee-name-match').innerHTML = '';
-            document.getElementById('employee-name-expected').textContent = '';
-            document.getElementById('payment-gross').textContent = '';
-            document.getElementById('payment-gross-match').innerHTML = '';
-            document.getElementById('payment-gross-expected').textContent = '';
-            document.getElementById('payment-net').textContent = '';
-            document.getElementById('payment-net-match').innerHTML = '';
-            document.getElementById('payment-net-expected').textContent = '';
+                const elements = [
+                    'employee-name', 'employee-name-match', 'employee-name-expected',
+                    'gross-amount', 'gross-amount-match', 'gross-amount-expected',
+                    'net-amount', 'net-amount-match', 'net-amount-expected'
+                ];
+                
+                elements.forEach(id => {
+                    const element = document.getElementById(id);
+                    if (element) {
+                        if (id.includes('match')) {
+                            element.innerHTML = '';
+                        } else {
+                            element.textContent = '';
+                        }
+                    }
         });
     });
+        } else if (processingMode.value === 'batch') {
+            // Get batch file input
+            const batchFileInput = document.getElementById('payslip-batch-file-input');
+            
+            if (!batchFileInput.files || batchFileInput.files.length === 0) {
+                alert('Bitte wählen Sie mindestens eine Datei aus.');
+                payslipLoading.style.display = 'none';
+                return;
+            }
+            
+            // Create form data
+            const batchFormData = new FormData();
+            
+            // Append all files
+            Array.from(batchFileInput.files).forEach((file, index) => {
+                batchFormData.append(`file_${index}`, file);
+            });
+            
+            // Send the request
+            fetch('/upload-payslip-batch', {
+                method: 'POST',
+                body: batchFormData
+            })
+            .then(response => {
+                if (!response.ok) {
+                    return response.json().then(data => {
+                        throw new Error(data.error || 'Fehler bei der Stapelverarbeitung');
+                    });
+                }
+                return response.json();
+            })
+            .then(data => {
+                // Hide loading indicator
+                if (payslipLoading) payslipLoading.style.display = 'none';
+                if (payslipContent) payslipContent.style.display = 'block';
+                
+                // Make sure the batch results are displayed
+                if (document.getElementById('single-file-results')) {
+                    document.getElementById('single-file-results').style.display = 'none';
+                }
+                if (document.getElementById('batch-results')) {
+                    document.getElementById('batch-results').style.display = 'block';
+                }
+                
+                // Display batch results
+                displayBatchResults(data);
+            })
+            .catch(error => {
+                if (payslipLoading) payslipLoading.style.display = 'none';
+                if (payslipContent) payslipContent.style.display = 'block';
+                
+                // Show error message
+                if (statusElement) {
+                    statusElement.innerHTML = 
+                        `<span class="material-icons">error</span><span>${error.message || "Fehler bei der Stapelverarbeitung"}</span>`;
+                    statusElement.className = 'summary-item error';
+                }
+            });
+        }
+    });
+    
+    // Function to display batch results
+    function displayBatchResults(data) {
+        // Update batch statistics
+        if (document.getElementById('batch-total')) {
+            document.getElementById('batch-total').textContent = data.total_files || 0;
+        }
+        if (document.getElementById('batch-success')) {
+            document.getElementById('batch-success').textContent = data.successful || 0;
+        }
+        if (document.getElementById('batch-error')) {
+            document.getElementById('batch-error').textContent = data.failed || 0;
+        }
+        
+        // Populate the results table
+        const tableBody = document.getElementById('batch-results-body');
+        if (tableBody) {
+            tableBody.innerHTML = '';
+            
+            if (data.results && data.results.length > 0) {
+                data.results.forEach(result => {
+                    const row = document.createElement('tr');
+                    
+                    // File name cell
+                    const fileCell = document.createElement('td');
+                    fileCell.textContent = result.filename || 'Unbekannt';
+                    row.appendChild(fileCell);
+                    
+                    // Employee name cell
+                    const nameCell = document.createElement('td');
+                    nameCell.textContent = result.employee_name || 'Nicht gefunden';
+                    row.appendChild(nameCell);
+                    
+                    // Gross amount cell
+                    const grossCell = document.createElement('td');
+                    grossCell.textContent = result.gross_amount || 'Nicht gefunden';
+                    row.appendChild(grossCell);
+                    
+                    // Net amount cell
+                    const netCell = document.createElement('td');
+                    netCell.textContent = result.net_amount || 'Nicht gefunden';
+                    row.appendChild(netCell);
+                    
+                    // Status cell
+                    const statusCell = document.createElement('td');
+                    const statusSpan = document.createElement('span');
+                    statusSpan.className = `batch-status ${result.success ? 'success' : 'error'}`;
+                    statusSpan.innerHTML = result.success ? 
+                        '<span class="material-icons">check_circle</span>Erfolgreich' : 
+                        '<span class="material-icons">error</span>Fehler';
+                    statusCell.appendChild(statusSpan);
+                    row.appendChild(statusCell);
+                    
+                    tableBody.appendChild(row);
+                });
+            } else {
+                const row = document.createElement('tr');
+                const cell = document.createElement('td');
+                cell.setAttribute('colspan', '5');
+                cell.textContent = 'Keine Ergebnisse verfügbar';
+                cell.style.textAlign = 'center';
+                row.appendChild(cell);
+                tableBody.appendChild(row);
+            }
+        }
+    }
     
     // Property Upload Functionality
     const propertyDropArea = document.getElementById('property-drop-area');
@@ -427,4 +926,292 @@ document.addEventListener('DOMContentLoaded', function() {
             document.getElementById('property-price').textContent = '';
         });
     });
-}); 
+
+    // Add restart button event listener if it exists
+    const restartButton = document.getElementById('restart-container-button');
+    if (restartButton) {
+        restartButton.addEventListener('click', restartContainerWithGPU);
+    }
+    
+    // Setup form event listeners
+    setupPayslipFormSubmit();
+    setupPropertyFormSubmit();
+    
+    // Show initial tab
+    showTab('payslips');
+    
+    // Add tab switching handlers
+    const payslipTab = document.querySelector('.nav-item[data-tab="payslips"]');
+    if (payslipTab) {
+        console.log('Found payslips tab, adding click handler');
+        payslipTab.addEventListener('click', function() {
+            showTab('payslips');
+        });
+    } else {
+        console.error('Payslips tab element not found');
+    }
+    
+    const propertyTab = document.querySelector('.nav-item[data-tab="properties"]');
+    if (propertyTab) {
+        console.log('Found properties tab, adding click handler');
+        propertyTab.addEventListener('click', function() {
+            showTab('properties');
+        });
+    } else {
+        console.error('Properties tab element not found');
+    }
+
+    // Setup batch upload button
+    const batchUploadBtn = document.getElementById('payslip-batch-upload-btn');
+    if (batchUploadBtn) {
+        batchUploadBtn.addEventListener('click', handleBatchUpload);
+    }
+    
+    // Setup batch upload drag-and-drop functionality
+    setupBatchUpload();
+
+    // Setup payslip file upload
+    setupPayslipUpload();
+});
+
+// Function to handle batch upload
+function handleBatchUpload() {
+    const batchFileInput = document.getElementById('payslip-batch-file-input');
+    const payslipLoading = document.getElementById('payslip-loading');
+    const payslipResults = document.getElementById('payslip-results');
+    const payslipContent = document.getElementById('payslip-results-content');
+    const statusElement = document.getElementById('payslip-status');
+    
+    if (!batchFileInput || !batchFileInput.files || batchFileInput.files.length === 0) {
+        alert('Bitte wählen Sie mindestens eine Datei aus.');
+        return;
+    }
+    
+    // Show loading state
+    if (payslipLoading) payslipLoading.style.display = 'block';
+    if (payslipResults) payslipResults.style.display = 'block';
+    if (payslipContent) payslipContent.style.display = 'none';
+    
+    // Create form data
+    const batchFormData = new FormData();
+    
+    // Append all files
+    Array.from(batchFileInput.files).forEach((file, index) => {
+        batchFormData.append(`file_${index}`, file);
+    });
+    
+    console.log(`Uploading ${batchFileInput.files.length} files for batch processing...`);
+    
+    // Send the request
+    fetch('/upload-payslip-batch', {
+        method: 'POST',
+        body: batchFormData
+    })
+    .then(response => {
+        if (!response.ok) {
+            return response.json().then(data => {
+                throw new Error(data.error || 'Fehler bei der Stapelverarbeitung');
+            });
+        }
+        return response.json();
+    })
+    .then(data => {
+        // Hide loading indicator
+        if (payslipLoading) payslipLoading.style.display = 'none';
+        if (payslipContent) payslipContent.style.display = 'block';
+        
+        // Make sure the batch results are displayed
+        if (document.getElementById('single-file-results')) {
+            document.getElementById('single-file-results').style.display = 'none';
+        }
+        if (document.getElementById('batch-results')) {
+            document.getElementById('batch-results').style.display = 'block';
+        }
+        
+        // Display batch results
+        displayBatchResults(data);
+    })
+    .catch(error => {
+        console.error('Batch upload error:', error);
+        if (payslipLoading) payslipLoading.style.display = 'none';
+        if (payslipContent) payslipContent.style.display = 'block';
+        
+        // Show error message
+        if (statusElement) {
+            statusElement.innerHTML = 
+                `<span class="material-icons">error</span><span>${error.message || "Fehler bei der Stapelverarbeitung"}</span>`;
+            statusElement.className = 'summary-item error';
+        }
+    });
+}
+
+// Function to setup batch upload drag-and-drop
+function setupBatchUpload() {
+    const batchDropArea = document.getElementById('payslip-batch-drop-area');
+    const batchFileInput = document.getElementById('payslip-batch-file-input');
+    const batchFileList = document.getElementById('batch-file-list');
+    
+    if (!batchDropArea || !batchFileInput || !batchFileList) return;
+    
+    // Handle click on drop area to trigger file input
+    batchDropArea.addEventListener('click', () => {
+        batchFileInput.click();
+    });
+    
+    // Prevent default behaviors for drag events
+    ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+        batchDropArea.addEventListener(eventName, preventDefaults, false);
+    });
+    
+    function preventDefaults(e) {
+        e.preventDefault();
+        e.stopPropagation();
+    }
+    
+    // Highlight the drop area when dragging files over it
+    ['dragenter', 'dragover'].forEach(eventName => {
+        batchDropArea.addEventListener(eventName, () => {
+            batchDropArea.classList.add('drag-active');
+        }, false);
+    });
+    
+    // Remove highlight when dragging leaves the drop area
+    ['dragleave', 'drop'].forEach(eventName => {
+        batchDropArea.addEventListener(eventName, () => {
+            batchDropArea.classList.remove('drag-active');
+        }, false);
+    });
+    
+    // Handle dropped files
+    batchDropArea.addEventListener('drop', (e) => {
+        const files = e.dataTransfer.files;
+        if (files.length > 0) {
+            batchFileInput.files = files;
+            updateBatchFileList(files);
+        }
+    }, false);
+    
+    // Handle selected files from file input
+    batchFileInput.addEventListener('change', function() {
+        if (this.files && this.files.length > 0) {
+            updateBatchFileList(this.files);
+        }
+    });
+    
+    // Update batch file list
+    function updateBatchFileList(files) {
+        batchFileList.innerHTML = '';
+        
+        if (files.length === 0) {
+            const noFilesElement = document.createElement('p');
+            noFilesElement.textContent = 'Keine Dateien ausgewählt';
+            batchFileList.appendChild(noFilesElement);
+            return;
+        }
+        
+        Array.from(files).forEach((file) => {
+            const fileItem = document.createElement('div');
+            fileItem.className = 'batch-file-item';
+            
+            const fileName = document.createElement('div');
+            fileName.className = 'batch-file-name';
+            fileName.textContent = file.name;
+            
+            fileItem.appendChild(fileName);
+            batchFileList.appendChild(fileItem);
+        });
+    }
+}
+
+// Add the missing setupPayslipFormSubmit function
+function setupPayslipFormSubmit() {
+    console.log("Setting up payslip form submission...");
+    // This function is now defined but doesn't need to do anything
+    // since the upload functionality is handled by the click events we've already set up
+}
+
+// Add setupPropertyFormSubmit if it doesn't exist
+function setupPropertyFormSubmit() {
+    console.log("Setting up property form submission...");
+    // This function is now defined but doesn't need to do anything
+    // since the upload functionality is handled by the click events we've already set up
+}
+
+// Function to set up payslip upload
+function setupPayslipUpload() {
+    const dropArea = document.getElementById('payslip-drop-area');
+    const fileInput = document.getElementById('payslip-file-input');
+    const uploadBtn = document.getElementById('payslip-upload-btn');
+    
+    if (!dropArea || !fileInput || !uploadBtn) {
+        console.error('Missing required elements for payslip upload');
+        return;
+    }
+    
+    // Handle click on drop area to trigger file input
+    dropArea.addEventListener('click', () => {
+        fileInput.click();
+    });
+    
+    // Prevent default behaviors for drag events
+    ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+        dropArea.addEventListener(eventName, e => {
+            e.preventDefault();
+            e.stopPropagation();
+        }, false);
+    });
+    
+    // Highlight the drop area when dragging files over it
+    ['dragenter', 'dragover'].forEach(eventName => {
+        dropArea.addEventListener(eventName, () => {
+            dropArea.classList.add('drag-active');
+        }, false);
+    });
+    
+    // Remove highlight when dragging leaves the drop area
+    ['dragleave', 'drop'].forEach(eventName => {
+        dropArea.addEventListener(eventName, () => {
+            dropArea.classList.remove('drag-active');
+        }, false);
+    });
+    
+    // Handle dropped files
+    dropArea.addEventListener('drop', (e) => {
+        const files = e.dataTransfer.files;
+        if (files.length > 0) {
+            fileInput.files = files;
+            updateFileName(files[0].name);
+        }
+    }, false);
+    
+    // Handle selected files from file input
+    fileInput.addEventListener('change', function() {
+        if (this.files && this.files.length > 0) {
+            updateFileName(this.files[0].name);
+        }
+    });
+    
+    // Update file name display
+    function updateFileName(fileName) {
+        // Remove existing file name if present
+        const existingFileName = dropArea.querySelector('.file-name');
+        if (existingFileName) {
+            existingFileName.remove();
+        }
+        
+        // Update the text in the drop area
+        const textElement = dropArea.querySelector('p');
+        if (textElement) {
+            textElement.textContent = `Ausgewählte Datei: ${fileName}`;
+        } else {
+            // Create file name display element if not using the paragraph
+            const fileNameElement = document.createElement('div');
+            fileNameElement.className = 'file-name';
+            fileNameElement.textContent = fileName;
+            dropArea.appendChild(fileNameElement);
+        }
+    }
+    
+    // Handle upload button click - now handled in the main click handler
+    console.log('Payslip upload functionality initialized');
+} 
