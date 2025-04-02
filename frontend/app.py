@@ -143,12 +143,12 @@ def upload_payslip():
         filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
         file.save(filepath)
         
-        # Send to backend for extraction only
+        # Send to backend
         try:
             with open(filepath, 'rb') as f:
                 files = {'file': (filename, f, 'application/pdf')}
                 response = requests.post(
-                    f"{app.config['BACKEND_URL']}/api/extract-payslip", 
+                    f"{app.config['BACKEND_URL']}/api/process-payslip", 
                     files=files
                 )
             

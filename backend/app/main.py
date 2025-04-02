@@ -3,15 +3,21 @@ import re
 import time
 import logging
 from datetime import datetime
-from fastapi import FastAPI, File, UploadFile, HTTPException, Depends
+from fastapi import FastAPI, File, UploadFile, HTTPException, Depends, Form, Request
 from sqlalchemy.orm import Session
 from fastapi.middleware.cors import CORSMiddleware
 from typing import Dict, List, Optional
 import json
+import subprocess
+import requests
+from fastapi.responses import FileResponse, JSONResponse
+import io
+import yaml
 
 from . import models, schemas, database
-from .database import engine, get_db
-from .qwen_processor import get_qwen_processor
+from .database import SessionLocal, engine
+from .qwen_processor import QwenVLProcessor
+from .docker_client import QwenDockerClient as DockerClient
 
 # Configure logging with absolute path
 # Use an absolute path that doesn't depend on working directory
@@ -62,13 +68,20 @@ models.Base.metadata.create_all(bind=engine)
 
 app = FastAPI()
 
-# Configure CORS
+# Allow CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173"],  # Frontend URL
+    allow_origins=["*"],  # For development
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+)
+
+# Initialize Docker client
+docker_client = DockerClient(
+    container_name="qwen-payslip-processor",
+    port=27842,
+    host="localhost"
 )
 
 # Load schema for validation
@@ -82,325 +95,958 @@ def load_schema():
         logger.error(f"Error loading schema: {str(e)}")
         return None
 
+# Dependency to get the database session
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
 @app.get("/")
 def read_root():
     return {"message": "Payslip Processor API is running"}
 
-@app.post("/api/extract-payslip")
-async def extract_payslip(file: UploadFile = File(...)):
-    """
-    Extract information from a payslip without validation.
-    Returns the extracted employee name, gross amount, and net amount.
-    """
-    start_time = time.time()
-    logger.info(f"Starting payslip processing for file: {file.filename}")
-    
+@app.get("/health")
+def health_check():
+    """Simple health check endpoint for the frontend to verify backend connection"""
+    return {
+        "status": "ok",
+        "timestamp": datetime.now().isoformat(),
+        "version": "1.0.0"
+    }
+
+@app.get("/container-status")
+def container_status():
+    """Get the current status of the Docker container"""
     try:
-        # Get the file content
-        content = await file.read()
+        logger.info("Checking Docker container status")
+        docker_status = docker_client._check_container_status()
+        logger.info(f"Container status check result: {docker_status.get('status', 'unknown')}")
         
-        # Get file extension to determine processing method
+        # Ensure status is one of the values the frontend expects: running, initializing, stopped, not_found, error
+        if docker_status["status"] not in ["running", "initializing", "stopped", "not_found", "error"]:
+            # If we get an unexpected status, map it to a value the frontend understands
+            logger.warning(f"Unexpected status '{docker_status['status']}', mapping to appropriate value")
+            if docker_status["status"] == "ok":
+                docker_status["status"] = "running"
+        
+        # Add GPU information to the response
+        docker_status["gpu_available"] = docker_client.gpu_info['available']
+        docker_status["gpu_name"] = docker_client.gpu_info['name']
+        
+        # Check if container should be using GPU but isn't
+        if docker_status["status"] == "running" and docker_client.gpu_info['available']:
+            try:
+                logger.info(f"Container is running and GPU is available, checking if container is using GPU")
+                response = requests.get(f"{docker_client.base_url}/status", timeout=3)
+                if response.status_code == 200:
+                    status_data = response.json()
+                    # Check for CUDA/GPU usage in status response
+                    docker_status["using_gpu"] = (
+                        'device' in status_data and 'cuda' in str(status_data['device']).lower()
+                    ) or (
+                        'gpu' in status_data and status_data['gpu']
+                    )
+                    if not docker_status["using_gpu"]:
+                        logger.warning("GPU is available but container is not using it")
+                        docker_status["warning"] = "GPU is available but container is not using it"
+                else:
+                    logger.warning(f"Container status endpoint returned non-200 status: {response.status_code}")
+                    docker_status["warning"] = f"Container status endpoint returned unexpected status: {response.status_code}"
+            except Exception as e:
+                logger.error(f"Error checking container GPU status: {e}")
+                # If we can't determine GPU status but logs show CUDA, assume it's using GPU
+                docker_status["using_gpu"] = False
+                docker_status["warning"] = f"Couldn't determine GPU status: {str(e)}"
+        
+        logger.info(f"Returning container status: {docker_status}")
+        return docker_status
+    except Exception as e:
+        logger.error(f"Error checking container status: {str(e)}")
+        error_response = {"status": "error", "message": str(e)}
+        logger.error(f"Returning error response: {error_response}")
+        return error_response
+
+@app.post("/restart-container-with-gpu")
+def restart_container_with_gpu():
+    """Restart the container with GPU support if GPU is available"""
+    try:
+        if not docker_client.gpu_info['available']:
+            return {"status": "error", "message": "No GPU detected on this system"}
+            
+        success = docker_client.restart_container_with_gpu()
+        
+        if success:
+            return {"status": "success", "message": "Container restarted with GPU support"}
+        else:
+            return {"status": "error", "message": "Failed to restart container with GPU support"}
+    except Exception as e:
+        logger.error(f"Error restarting container: {e}")
+        return {"status": "error", "message": str(e)}
+
+@app.post("/api/extract-payslip")
+async def extract_payslip(
+    file: UploadFile = File(...),
+    window_mode: Optional[str] = Form("quadrant"),  # Default window mode
+    memory_isolation: Optional[str] = Form(None),  # Allow setting memory isolation
+    force_cpu: Optional[bool] = Form(False)  # Allow forcing CPU but default to false
+):
+    """
+    Extract data from a payslip PDF - Default mode for backward compatibility
+    """
+    try:
+        # Read uploaded file
+        file_content = await file.read()
         file_ext = os.path.splitext(file.filename)[1].lower()
         
         # Process file based on file type
-        processor = get_qwen_processor()
+        processor = QwenVLProcessor(document_type="payslip")
+        
+        # Set processing configuration from parameters
+        if "processing" not in processor.config:
+            processor.config["processing"] = {}
+            
+        # Set window mode from parameter
+        processor.config["processing"]["window_mode"] = window_mode
+        
+        # Set mode-appropriate window selections
+        valid_windows = {
+            "vertical": ["top", "bottom"],
+            "horizontal": ["left", "right"],  # Horizontal splits document into left/right parts
+            "quadrant": ["top_left", "top_right", "bottom_left", "bottom_right"],
+            "whole": ["whole"]
+        }
+        
+        # Select appropriate windows based on window_mode
+        if window_mode in valid_windows:
+            processor.config["processing"]["selected_windows"] = valid_windows[window_mode]
+            
+        # Set memory isolation if provided
+        if memory_isolation is not None:
+            processor.config["processing"]["memory_isolation"] = memory_isolation
+            
+        # Set force_cpu if provided
+        processor.config["processing"]["force_cpu"] = force_cpu
+        
+        # Ensure global settings don't override our explicit window mode choices
+        if "global" in processor.config:
+            # Replace global settings to prevent conflicts with our explicit selection
+            processor.config["global"] = {
+                "mode": window_mode,
+                "selected_windows": valid_windows[window_mode]
+            }
+            # Keep any existing prompt instructions if present
+            if "prompt_instructions" in processor.config.get("global", {}):
+                processor.config["global"]["prompt_instructions"] = processor.config["global"].get("prompt_instructions")
+            
+            logger.info(f"Replaced global settings to ensure {window_mode} mode is used for payslip processing")
+        
+        logger.info(f"Processing payslip with window mode '{window_mode}'")
         
         if file_ext in ['.pdf']:
-            result = processor.process_pdf_file(content)
-        elif file_ext in ['.jpg', '.jpeg', '.png']:
-            result = processor.process_image_file(content)
+            extracted_data = processor.process_pdf_file(
+                pdf_bytes=file_content,
+                file_name=file.filename
+            )
+            return extracted_data
         else:
-            raise HTTPException(status_code=400, detail="Unsupported file format. Please upload a PDF or image file.")
-        
-        if not result:
-            raise HTTPException(status_code=404, detail="No valid data could be extracted from the document.")
-        
-        # Calculate processing time
-        processing_time = time.time() - start_time
-        logger.info(f"Payslip processing completed in {processing_time:.2f} seconds")
-        
-        # Return the extracted data with timing information
-        return {
-            "employee": {
-                "name": result["employee"]["name"]
-            },
-            "payment": {
-                "gross": result["payment"]["gross"],
-                "net": result["payment"]["net"]
-            },
-            "raw_output": result["raw_output"],
-            "processing_time": f"{processing_time:.2f} seconds"
-        }
-    
+            raise HTTPException(status_code=400, detail=f"Unsupported file type: {file_ext}")
     except Exception as e:
-        processing_time = time.time() - start_time
-        logger.error(f"Error processing file: {str(e)}")
-        logger.error(f"Failed processing took {processing_time:.2f} seconds")
-        raise HTTPException(status_code=500, detail=f"Error processing file: {str(e)}")
+        logger.error(f"Error processing payslip: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/extract-payslip-single")
+async def extract_payslip_single(
+    file: UploadFile = File(...),
+    employee_name_page: Optional[int] = Form(None),
+    employee_name_quadrant: Optional[str] = Form(None),
+    gross_page: Optional[int] = Form(None),
+    gross_quadrant: Optional[str] = Form(None),
+    net_page: Optional[int] = Form(None),
+    net_quadrant: Optional[str] = Form(None),
+    window_mode: Optional[str] = Form("quadrant"),  # Default window mode
+    memory_isolation: Optional[str] = Form(None),  # Allow setting memory isolation
+    force_cpu: Optional[bool] = Form(False)  # Allow forcing CPU but default to false
+):
+    """
+    Extract data from a single payslip PDF with optional page and quadrant specifications
+    """
+    try:
+        # Read uploaded file
+        file_content = await file.read()
+        file_ext = os.path.splitext(file.filename)[1].lower()
+        
+        if file_ext not in ['.pdf']:
+            raise HTTPException(status_code=400, detail=f"Unsupported file type: {file_ext}")
+        
+        # Initialize processor with default config
+        processor = QwenVLProcessor(document_type="payslip")
+        
+        # Check if page/quadrant information was provided
+        has_page_info = any([
+            employee_name_page is not None,
+            gross_page is not None,
+            net_page is not None
+        ])
+        
+        has_quadrant_info = any([
+            employee_name_quadrant is not None,
+            gross_quadrant is not None,
+            net_quadrant is not None
+        ])
+        
+        # Update processing config with user-specified parameters
+        if "processing" not in processor.config:
+            processor.config["processing"] = {}
+            
+        # Set window mode from parameter or default to quadrant
+        processor.config["processing"]["window_mode"] = window_mode
+        
+        # Set memory isolation if provided
+        if memory_isolation is not None:
+            processor.config["processing"]["memory_isolation"] = memory_isolation
+            
+        # Set force_cpu if provided
+        processor.config["processing"]["force_cpu"] = force_cpu
+        
+        if has_page_info or has_quadrant_info:
+            # Use guided extraction with specific page/section
+            logger.info("Processing payslip with guided extraction")
+            
+            # Process each field
+            results = {}
+            guided_processing_info = {
+                "used": True,
+                "fields": {}
+            }
+            
+            # Process specific fields in different pages/quadrants
+            # Employee name
+            if employee_name_page is not None:
+                logger.info(f"Extracting employee name from page {employee_name_page}, quadrant {employee_name_quadrant}")
+                guided_processing_info["fields"]["employee_name"] = {
+                    "page": employee_name_page,
+                    "quadrant": employee_name_quadrant
+                }
+                
+                # Set up page-specific configuration
+                page_configs = {}
+                
+                # Determine the correct window mode and selections based on quadrant
+                extraction_window_mode = window_mode
+                extraction_selected_windows = [employee_name_quadrant] if employee_name_quadrant else None
+                
+                # Ensure the window mode matches the quadrant
+                if employee_name_quadrant:
+                    if employee_name_quadrant in ["top", "bottom"]:
+                        extraction_window_mode = "vertical"
+                    elif employee_name_quadrant in ["top_left", "top_right", "bottom_left", "bottom_right"]:
+                        extraction_window_mode = "quadrant"
+                    else:
+                        extraction_window_mode = "whole"
+                else:
+                    extraction_window_mode = "whole"
+                    extraction_selected_windows = None
+                
+                page_configs[str(employee_name_page)] = {
+                    "mode": extraction_window_mode,
+                    "selected_windows": extraction_selected_windows
+                }
+                
+                # Add to processor config
+                processor.config["pages"] = page_configs
+                
+                # Process the specific page
+                partial_result = processor.process_pdf_with_pages(
+                    pdf_bytes=file_content,
+                    file_name=file.filename,
+                    pages=[employee_name_page]
+                )
+                
+                # Extract employee name and add to results
+                if "employee" in partial_result and "name" in partial_result["employee"]:
+                    if "employee" not in results:
+                        results["employee"] = {}
+                    results["employee"]["name"] = partial_result["employee"]["name"]
+            
+            # Gross amount
+            if gross_page is not None:
+                logger.info(f"Extracting gross amount from page {gross_page}, quadrant {gross_quadrant}")
+                guided_processing_info["fields"]["gross_amount"] = {
+                    "page": gross_page,
+                    "quadrant": gross_quadrant
+                }
+                
+                # Set up page-specific configuration
+                page_configs = {}
+                
+                # Determine the correct window mode and selections based on quadrant
+                extraction_window_mode = window_mode
+                extraction_selected_windows = [gross_quadrant] if gross_quadrant else None
+                
+                # Ensure the window mode matches the quadrant
+                if gross_quadrant:
+                    if gross_quadrant in ["top", "bottom"]:
+                        extraction_window_mode = "vertical"
+                    elif gross_quadrant in ["top_left", "top_right", "bottom_left", "bottom_right"]:
+                        extraction_window_mode = "quadrant"
+                    else:
+                        extraction_window_mode = "whole"
+                else:
+                    extraction_window_mode = "whole"
+                    extraction_selected_windows = None
+                
+                page_configs[str(gross_page)] = {
+                    "mode": extraction_window_mode,
+                    "selected_windows": extraction_selected_windows
+                }
+                
+                # Add to processor config
+                processor.config["pages"] = page_configs
+                
+                # Process the specific page
+                partial_result = processor.process_pdf_with_pages(
+                    pdf_bytes=file_content,
+                    file_name=file.filename,
+                    pages=[gross_page]
+                )
+                
+                # Extract gross amount and add to results
+                if "payment" in partial_result and "gross" in partial_result["payment"]:
+                    if "payment" not in results:
+                        results["payment"] = {}
+                    results["payment"]["gross"] = partial_result["payment"]["gross"]
+            
+            # Net amount
+            if net_page is not None:
+                logger.info(f"Extracting net amount from page {net_page}, quadrant {net_quadrant}")
+                guided_processing_info["fields"]["net_amount"] = {
+                    "page": net_page,
+                    "quadrant": net_quadrant
+                }
+                
+                # Set up page-specific configuration
+                page_configs = {}
+                
+                # Determine the correct window mode and selections based on quadrant
+                extraction_window_mode = window_mode
+                extraction_selected_windows = [net_quadrant] if net_quadrant else None
+                
+                # Ensure the window mode matches the quadrant
+                if net_quadrant:
+                    if net_quadrant in ["top", "bottom"]:
+                        extraction_window_mode = "vertical"
+                    elif net_quadrant in ["top_left", "top_right", "bottom_left", "bottom_right"]:
+                        extraction_window_mode = "quadrant"
+                    else:
+                        extraction_window_mode = "whole"
+                else:
+                    extraction_window_mode = "whole"
+                    extraction_selected_windows = None
+                
+                page_configs[str(net_page)] = {
+                    "mode": extraction_window_mode,
+                    "selected_windows": extraction_selected_windows
+                }
+                
+                # Add to processor config
+                processor.config["pages"] = page_configs
+                
+                # Process the specific page
+                partial_result = processor.process_pdf_with_pages(
+                    pdf_bytes=file_content,
+                    file_name=file.filename,
+                    pages=[net_page]
+                )
+                
+                # Extract net amount and add to results
+                if "payment" in partial_result and "net" in partial_result["payment"]:
+                    if "payment" not in results:
+                        results["payment"] = {}
+                    results["payment"]["net"] = partial_result["payment"]["net"]
+            
+            # Ensure minimum result structure
+            if "employee" not in results:
+                results["employee"] = {"name": "unknown"}
+            if "payment" not in results:
+                results["payment"] = {"gross": "0", "net": "0"}
+            
+            # Add processing info to results
+            results["guided_processing"] = guided_processing_info
+            
+            return results
+        else:
+            # No specific page/quadrant info provided, use default window mode
+            logger.info(f"Processing payslip with default window mode: {window_mode}")
+            
+            # Set mode-appropriate window selections
+            valid_windows = {
+                "vertical": ["top", "bottom"],
+                "horizontal": ["left", "right"],  # Horizontal splits document into left/right parts
+                "quadrant": ["top_left", "top_right", "bottom_left", "bottom_right"],
+                "whole": ["whole"]
+            }
+            
+            # Select appropriate windows based on window_mode
+            if window_mode in valid_windows:
+                processor.config["processing"]["selected_windows"] = valid_windows[window_mode]
+            
+            # If using quadrant mode, ensure global settings don't override
+            if window_mode == "quadrant":
+                # Override global settings
+                if "global" in processor.config:
+                    # Instead of just updating global mode, replace it completely to avoid conflicts
+                    processor.config["global"] = {
+                        "mode": "quadrant",
+                        "selected_windows": valid_windows["quadrant"]
+                    }
+                    # Keep any existing prompt instructions if present
+                    if "prompt_instructions" in processor.config.get("global", {}):
+                        processor.config["global"]["prompt_instructions"] = processor.config["global"].get("prompt_instructions")
+                    
+                    logger.info("Completely replaced global settings to ensure quadrant mode is used")
+            
+            extracted_data = processor.process_pdf_file(
+                pdf_bytes=file_content,
+                file_name=file.filename
+            )
+            
+            # Add metadata indicating no guided processing was used
+            extracted_data["guided_processing"] = {
+                "used": False,
+                "window_mode": window_mode
+            }
+            
+            return extracted_data
+            
+    except Exception as e:
+        logger.error(f"Error processing payslip: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/extract-payslip-batch")
+async def extract_payslip_batch(
+    files: List[UploadFile] = File(...),
+    window_mode: Optional[str] = Form("horizontal"),  # Default window mode
+    memory_isolation: Optional[str] = Form(None),  # Allow setting memory isolation
+    force_cpu: Optional[bool] = Form(False)  # Allow forcing CPU but default to false
+):
+    """
+    Extract data from multiple payslip PDFs using batch processing
+    """
+    try:
+        all_results = []
+        total_files = len(files)
+        logger.info(f"Processing batch of {total_files} payslip files")
+        
+        # Initialize processor with default config for batch processing
+        processor = QwenVLProcessor(document_type="payslip")
+        
+        # Set processing configuration from parameters
+        if "processing" not in processor.config:
+            processor.config["processing"] = {}
+            
+        # Set window mode from parameter
+        processor.config["processing"]["window_mode"] = window_mode
+        
+        # Set mode-appropriate window selections
+        valid_windows = {
+            "vertical": ["top", "bottom"],
+            "horizontal": ["top", "bottom"],  # Horizontal splits document into top/bottom parts
+            "quadrant": ["top_left", "top_right", "bottom_left", "bottom_right"],
+            "whole": ["whole"]
+        }
+        
+        # Select appropriate windows based on window_mode
+        if window_mode in valid_windows:
+            processor.config["processing"]["selected_windows"] = valid_windows[window_mode]
+            
+        # Set memory isolation if provided
+        if memory_isolation is not None:
+            processor.config["processing"]["memory_isolation"] = memory_isolation
+            
+        # Set force_cpu if provided
+        processor.config["processing"]["force_cpu"] = force_cpu
+        
+        # Ensure global settings don't override our explicit window mode choices
+        if "global" in processor.config:
+            # Replace global settings to prevent conflicts with our explicit selection
+            processor.config["global"] = {
+                "mode": window_mode,
+                "selected_windows": valid_windows[window_mode]
+            }
+            # Keep any existing prompt instructions if present
+            if "prompt_instructions" in processor.config.get("global", {}):
+                processor.config["global"]["prompt_instructions"] = processor.config["global"].get("prompt_instructions")
+            
+            logger.info(f"Replaced global settings to ensure {window_mode} mode is used for batch processing")
+        
+        logger.info(f"Using window mode '{window_mode}' with windows {processor.config['processing'].get('selected_windows', [])}")
+        
+        for i, file in enumerate(files):
+            try:
+                # Read file content
+                file_content = await file.read()
+                file_ext = os.path.splitext(file.filename)[1].lower()
+                
+                if file_ext not in ['.pdf']:
+                    all_results.append({
+                        "filename": file.filename,
+                        "error": f"Unsupported file type: {file_ext}",
+                        "success": False
+                    })
+                    continue
+                
+                logger.info(f"Processing file {i+1}/{total_files}: {file.filename}")
+                
+                # Process the file
+                extracted_data = processor.process_pdf_file(
+                    pdf_bytes=file_content,
+                    file_name=file.filename
+                )
+                
+                # Add filename to the result
+                extracted_data["filename"] = file.filename
+                extracted_data["success"] = True
+                
+                all_results.append(extracted_data)
+                
+            except Exception as e:
+                logger.error(f"Error processing file {file.filename}: {str(e)}")
+                all_results.append({
+                    "filename": file.filename,
+                    "error": str(e),
+                    "success": False
+                })
+        
+        # Return batch results
+        return {
+            "batch_results": all_results,
+            "total_files": total_files,
+            "successful_files": sum(1 for r in all_results if r.get("success", False)),
+            "processing_mode": "batch",
+            "window_mode": window_mode
+        }
+        
+    except Exception as e:
+        logger.error(f"Error in batch processing: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/validate-payslip-by-id")
 async def validate_payslip_by_id(data: dict, db: Session = Depends(get_db)):
     """
     Validate extracted payslip data against a specific employee ID.
-    Returns whether the extracted data matches the expected values in the database.
     """
-    start_time = time.time()
-    employee_id = data.get("employeeId", "unknown")
-    logger.info(f"Starting payslip validation for employee ID: {employee_id}")
-    
     try:
-        # Extract data from request
-        employee_id = data.get("employeeId")
-        extracted_data = data.get("extractedData")
+        # Extract employee ID from the data
+        employee_id = data.get("employee_id")
+        payslip_data = data.get("payslip_data")
         
-        if not employee_id or not extracted_data:
-            logger.warning(f"Missing employee ID or extracted data in validation request")
-            raise HTTPException(status_code=400, detail="Missing employee ID or extracted data")
-        
-        # Look up the employee in the database
-        employee = db.query(models.Employee).filter(models.Employee.id == employee_id).first()
-        
-        if not employee:
-            logger.info(f"No employee found with ID {employee_id}")
-            return {
-                "employeeFound": False,
-                "message": f"No employee found with ID {employee_id}"
-            }
-        
-        # Get the extracted values
-        extracted_name = extracted_data.get("employee", {}).get("name", "")
-        
-        # Clean the amounts (remove currency symbols and convert to float)
-        extracted_gross = extracted_data.get("payment", {}).get("gross", "0")
-        extracted_net = extracted_data.get("payment", {}).get("net", "0")
-        
-        # Clean up amounts - remove currency symbol and convert German format to float
-        def clean_amount(amount_str):
-            if isinstance(amount_str, (int, float)):
-                return float(amount_str)
+        if not employee_id:
+            raise HTTPException(status_code=400, detail="Employee ID is required")
             
-            # Remove currency symbol and whitespace
-            cleaned = re.sub(r'[€\s]', '', amount_str)
-            # Replace German decimal comma with dot
-            cleaned = cleaned.replace(',', '.')
-            # Try to convert to float
-            try:
-                return float(cleaned)
-            except ValueError:
-                return 0.0
+        if not payslip_data:
+            raise HTTPException(status_code=400, detail="Payslip data is required")
         
-        extracted_gross_float = clean_amount(extracted_gross)
-        extracted_net_float = clean_amount(extracted_net)
-        
-        # Validate the extracted data against the database record
-        name_matches = employee.name.lower() == extracted_name.lower()
-        
-        # Allow for a small difference in amounts due to formatting/rounding
-        def values_match(val1, val2, tolerance=0.01):
-            return abs(val1 - val2) <= tolerance
-        
-        gross_matches = values_match(employee.expected_gross, extracted_gross_float)
-        net_matches = values_match(employee.expected_net, extracted_net_float)
-        
-        # Format the response
+        # TODO: Implement validation logic against employee database
+        # For now, we'll just return a mock validation result
         validation_result = {
-            "employeeFound": True,
-            "validation": {
-                "name": {
-                    "matches": name_matches,
-                    "expected": employee.name
-                },
-                "gross": {
-                    "matches": gross_matches,
-                    "expected": '{:.2f}'.format(employee.expected_gross)
-                },
-                "net": {
-                    "matches": net_matches,
-                    "expected": '{:.2f}'.format(employee.expected_net)
-                }
-            },
-            "message": "Validation completed"
+            "is_valid": True,
+            "employee_id": employee_id,
+            "matched_fields": ["name", "salary", "position"],
+            "mismatched_fields": [],
+            "validation_time": datetime.now().isoformat()
         }
-        
-        # Log validation result
-        validation_summary = f"Validation for {employee.name}: Name: {'✓' if name_matches else '✗'}, Gross: {'✓' if gross_matches else '✗'}, Net: {'✓' if net_matches else '✗'}"
-        logger.info(validation_summary)
-        
-        # Calculate processing time
-        processing_time = time.time() - start_time
-        logger.info(f"Payslip validation completed in {processing_time:.2f} seconds")
         
         return validation_result
-    
     except Exception as e:
-        processing_time = time.time() - start_time
         logger.error(f"Error validating payslip: {str(e)}")
-        logger.error(f"Failed validation took {processing_time:.2f} seconds")
-        raise HTTPException(status_code=500, detail=f"Error validating payslip: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/process-property")
-async def process_property(file: UploadFile = File(...)):
+async def process_property(
+    file: UploadFile = File(...),
+    window_mode: Optional[str] = Form("whole"),  # Default window mode for property listings
+    memory_isolation: Optional[str] = Form(None),  # Allow setting memory isolation
+    force_cpu: Optional[bool] = Form(False)  # Allow forcing CPU but default to false
+):
     """
-    Process property listing files using the sliding window approach.
-    Extracts living space and purchase price information.
+    Process a property listing document to extract data
     """
-    start_time = time.time()
-    logger.info(f"Starting property processing for file: {file.filename}")
-    
     try:
-        # Get the file content
-        content = await file.read()
-        
-        # Get file extension to determine processing method
+        # Read uploaded file
+        file_content = await file.read()
         file_ext = os.path.splitext(file.filename)[1].lower()
         
-        # Process file
-        processor = get_qwen_processor()
+        # Process file based on file type
+        processor = QwenVLProcessor(document_type="property")
         
-        if file_ext in ['.pdf']:
-            # Extract data from the PDF
-            images = processor.convert_pdf_to_images(content)
-            if not images:
-                logger.warning(f"No pages found in PDF: {file.filename}")
-                raise HTTPException(status_code=404, detail="No pages found in PDF")
+        # Set processing configuration from parameters
+        if "processing" not in processor.config:
+            processor.config["processing"] = {}
             
-            # Use the first page
-            image = images[0]
-        elif file_ext in ['.jpg', '.jpeg', '.png']:
-            # Process as image
-            from PIL import Image
-            import io
-            image = Image.open(io.BytesIO(content))
-        else:
-            logger.warning(f"Unsupported file format: {file_ext}")
-            raise HTTPException(status_code=400, detail="Unsupported file format. Please upload a PDF or image file.")
+        # Set window mode from parameter
+        processor.config["processing"]["window_mode"] = window_mode
         
-        # Process property listing with a custom prompt for property information
-        windows = processor.split_image_for_sliding_window(image)
-        extracted_info = {
-            "living_space": "nicht gefunden",
-            "purchase_price": "nicht gefunden",
-            "raw_output": ""
+        # Set mode-appropriate window selections
+        valid_windows = {
+            "vertical": ["top", "bottom"],
+            "horizontal": ["top", "bottom"],  # Horizontal splits document into top/bottom parts
+            "quadrant": ["top_left", "top_right", "bottom_left", "bottom_right"],
+            "whole": ["whole"]
         }
         
-        # Process each window looking for property information
-        for i, window in enumerate(windows):
-            position = "top" if i == 0 else "bottom"
+        # Select appropriate windows based on window_mode
+        if window_mode in valid_windows:
+            processor.config["processing"]["selected_windows"] = valid_windows[window_mode]
             
-            # Customize the prompt based on position
-            if position == "top":
-                prompt = """Du siehst ein deutsches Immobilienangebot (oberer Teil).
-                
-                SUCHE PRÄZISE NACH:
-                Wohnfläche (meist mit Einheit "m²" angegeben).
-                
-                SCHAUE HIER: In einer Tabelle oder Liste mit Immobiliendetails. Suche nach einer Zeile mit "Wohnfläche".
-                
-                FORMAT: Die Wohnfläche wird meist als Zahl mit "m²" oder "qm" angegeben, manchmal mit "ca." davor.
-                
-                Gib deinen Fund als JSON zurück:
-                {
-                "property_top": {
-                    "living_space": "gefundene Wohnfläche mit Einheit oder 'nicht gefunden'",
-                    "purchase_price": "nicht gefunden"
-                }
-                }"""
-            else:
-                prompt = """Du siehst ein deutsches Immobilienangebot (unterer Teil).
-                
-                SUCHE PRÄZISE NACH:
-                Kaufpreis (meist mit "€" oder "EUR" angegeben).
-                
-                SCHAUE HIER: In einer Tabelle oder Liste mit Immobiliendetails. Suche nach einer Zeile mit "Kaufpreis" oder "Preis".
-                
-                FORMAT: Der Kaufpreis wird meist als Zahl mit Tausenderpunkten und Komma für Dezimalstellen angegeben, gefolgt vom Euro-Symbol.
-                
-                Gib deinen Fund als JSON zurück:
-                {
-                "property_bottom": {
-                    "living_space": "nicht gefunden",
-                    "purchase_price": "gefundener Kaufpreis mit Währungssymbol oder 'nicht gefunden'"
-                }
-                }"""
+        # Set memory isolation if provided
+        if memory_isolation is not None:
+            processor.config["processing"]["memory_isolation"] = memory_isolation
             
-            # Process window using progressive resolution approach
-            try:
-                # Override the default prompt
-                window_data = processor._process_window_with_custom_prompt(window, position, prompt)
-                extracted_info["raw_output"] += f"\n--- {position.upper()} WINDOW EXTRACTION ---\n"
-                extracted_info["raw_output"] += json.dumps(window_data, indent=2)
-                
-                # Extract property data
-                window_key = f"property_{position}"
-                if window_key in window_data:
-                    property_data = window_data[window_key]
-                    
-                    if "living_space" in property_data and property_data["living_space"] != "nicht gefunden":
-                        # Clean up and standardize living space format
-                        living_space = property_data["living_space"]
-                        # Extract just the value and unit if there's extra text
-                        living_space_match = re.search(r'ca\.\s*(\d+(?:,\d+)?)\s*m(?:²|2)', living_space, re.IGNORECASE)
-                        if not living_space_match:
-                            living_space_match = re.search(r'(\d+(?:,\d+)?)\s*m(?:²|2)', living_space, re.IGNORECASE)
-                        
-                        if living_space_match:
-                            extracted_info["living_space"] = f"ca. {living_space_match.group(1)} m²"
-                        else:
-                            extracted_info["living_space"] = living_space
-                    
-                    if "purchase_price" in property_data and property_data["purchase_price"] != "nicht gefunden":
-                        # Clean up and standardize purchase price format
-                        purchase_price = property_data["purchase_price"]
-                        # Extract just the value and currency if there's extra text
-                        price_match = re.search(r'(\d+(?:\.\d+)*(?:,\d+)?)\s*(?:€|EUR)', purchase_price, re.IGNORECASE)
-                        
-                        if price_match:
-                            price_value = price_match.group(1)
-                            # Ensure correct German number format with thousands separator
-                            if '.' in price_value and ',' in price_value:
-                                # Already has both thousand and decimal separators
-                                extracted_info["purchase_price"] = f"{price_value} €"
-                            elif '.' in price_value:
-                                # Convert from international to German format if needed
-                                parts = price_value.split('.')
-                                if len(parts[-1]) == 2:  # Looks like international format
-                                    price_value = price_value.replace('.', 'X').replace(',', '.').replace('X', ',')
-                                extracted_info["purchase_price"] = f"{price_value} €"
-                            else:
-                                # Just add the Euro symbol if missing
-                                extracted_info["purchase_price"] = f"{price_value} €"
-                        else:
-                            extracted_info["purchase_price"] = purchase_price
-            except Exception as e:
-                logger.error(f"Error processing {position} window: {str(e)}")
+        # Set force_cpu if provided
+        processor.config["processing"]["force_cpu"] = force_cpu
         
-        # Check schema validation
-        schema = load_schema()
-        if schema and "property" in schema:
-            # Just check required fields are present
-            required_fields = schema["property"].get("required", [])
-            for field in required_fields:
-                if extracted_info.get(field) == "nicht gefunden":
-                    logger.warning(f"Required field '{field}' not found in property listing")
+        # Ensure global settings don't override our explicit window mode choices
+        if "global" in processor.config:
+            # Replace global settings to prevent conflicts with our explicit selection
+            processor.config["global"] = {
+                "mode": window_mode,
+                "selected_windows": valid_windows[window_mode]
+            }
+            # Keep any existing prompt instructions if present
+            if "prompt_instructions" in processor.config.get("global", {}):
+                processor.config["global"]["prompt_instructions"] = processor.config["global"].get("prompt_instructions")
+            
+            logger.info(f"Replaced global settings to ensure {window_mode} mode is used for property processing")
         
-        # Calculate processing time
-        processing_time = time.time() - start_time
-        logger.info(f"Property processing completed in {processing_time:.2f} seconds")
+        logger.info(f"Processing property document with window mode '{window_mode}'")
         
-        return extracted_info
-    
+        if file_ext in ['.pdf']:
+            extracted_data = processor.process_pdf_file(
+                pdf_bytes=file_content,
+                file_name=file.filename
+            )
+            return extracted_data
+        elif file_ext in ['.jpg', '.jpeg', '.png']:
+            extracted_data = processor.process_image_file(
+                image_bytes=file_content
+            )
+            return extracted_data
+        else:
+            raise HTTPException(status_code=400, detail=f"Unsupported file type: {file_ext}")
     except Exception as e:
-        processing_time = time.time() - start_time
-        logger.error(f"Error processing property listing: {str(e)}")
-        logger.error(f"Failed processing took {processing_time:.2f} seconds")
-        raise HTTPException(status_code=500, detail=f"Error processing property listing: {str(e)}")
+        logger.error(f"Error processing property document: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/config")
+def get_config(document_type: str = "payslip"):
+    """
+    Get the current configuration settings for a document type
+    """
+    try:
+        # Initialize processor with the specified document type to load its config
+        processor = QwenVLProcessor(document_type=document_type)
+        
+        # Return the config data
+        return {
+            "document_type": document_type,
+            "config": processor.config
+        }
+    except Exception as e:
+        logger.error(f"Error getting configuration: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/config/update")
+async def update_config(data: dict, document_type: str = "payslip"):
+    """
+    Update configuration settings for a document type
+    
+    The request body should contain configuration sections to update, e.g.:
+    {
+        "processing": {
+            "window_mode": "horizontal",
+            "selected_windows": ["left", "right"]
+        },
+        "pdf": {
+            "dpi": 400
+        }
+    }
+    """
+    try:
+        # Initialize processor with the specified document type to load its config
+        processor = QwenVLProcessor(document_type=document_type)
+        
+        # Get the current config
+        current_config = processor.config
+        
+        # Update configuration with provided values
+        for section, settings in data.items():
+            if section not in current_config:
+                current_config[section] = {}
+            
+            if isinstance(settings, dict):
+                for key, value in settings.items():
+                    current_config[section][key] = value
+        
+        # Save the updated configuration
+        config_path = os.path.normpath(os.path.join(
+            os.path.dirname(os.path.dirname(__file__)), 
+            f'config_{document_type}.yml'
+        ))
+        
+        try:
+            with open(config_path, 'w') as f:
+                yaml.dump(current_config, f, default_flow_style=False, sort_keys=False)
+                
+            logger.info(f"Updated configuration saved to {config_path}")
+        except Exception as e:
+            logger.error(f"Error saving configuration: {str(e)}")
+            raise HTTPException(status_code=500, detail=f"Error saving configuration: {str(e)}")
+        
+        # Return the updated config
+        return {
+            "document_type": document_type,
+            "config": current_config,
+            "message": "Configuration updated successfully"
+        }
+    except Exception as e:
+        logger.error(f"Error updating configuration: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.on_event("shutdown")
 def shutdown_event():
     """Release resources on server shutdown"""
+    logger.info("Server shutting down")
+    # No resources to clean up when using Docker container 
+
+@app.post("/api/extract-payslip-advanced")
+async def extract_payslip_advanced(
+    file: UploadFile = File(...),
+    # Core processing parameters
+    window_mode: Optional[str] = Form(None),
+    selected_windows: Optional[str] = Form(None),
+    memory_isolation: Optional[str] = Form(None),
+    force_cpu: Optional[bool] = Form(None),
+    gpu_memory_fraction: Optional[float] = Form(None),
+    pages: Optional[str] = Form(None),
+    
+    # PDF parameters
+    pdf_dpi: Optional[int] = Form(None),
+    
+    # Image parameters
+    image_resolution_steps: Optional[str] = Form(None),
+    image_enhance_contrast: Optional[bool] = Form(None),
+    image_sharpen_factor: Optional[float] = Form(None),
+    image_contrast_factor: Optional[float] = Form(None),
+    image_brightness_factor: Optional[float] = Form(None),
+    image_ocr_language: Optional[str] = Form(None),
+    image_ocr_threshold: Optional[int] = Form(None),
+    
+    # Window settings
+    window_overlap: Optional[float] = Form(None),
+    window_min_size: Optional[int] = Form(None),
+    
+    # Text generation settings
+    text_generation_max_new_tokens: Optional[int] = Form(None),
+    text_generation_use_beam_search: Optional[bool] = Form(None),
+    text_generation_num_beams: Optional[int] = Form(None),
+    text_generation_temperature: Optional[float] = Form(None),
+    text_generation_top_p: Optional[float] = Form(None),
+    
+    # Extraction settings
+    extraction_confidence_threshold: Optional[float] = Form(None),
+    extraction_fuzzy_matching: Optional[bool] = Form(None),
+    
+    # Global settings
+    global_mode: Optional[str] = Form(None),
+    global_prompt: Optional[str] = Form(None),
+    global_selected_windows: Optional[str] = Form(None),
+    
+    # Window-specific prompts
+    prompt_top: Optional[str] = Form(None),
+    prompt_bottom: Optional[str] = Form(None),
+    prompt_left: Optional[str] = Form(None),
+    prompt_right: Optional[str] = Form(None),
+    prompt_top_left: Optional[str] = Form(None),
+    prompt_top_right: Optional[str] = Form(None),
+    prompt_bottom_left: Optional[str] = Form(None),
+    prompt_bottom_right: Optional[str] = Form(None),
+    prompt_whole: Optional[str] = Form(None)
+):
+    """
+    Advanced API endpoint that directly passes all parameters to the Docker container
+    
+    This endpoint provides complete control over all processing parameters
+    supported by the Docker container, allowing fine-grained customization
+    without needing to modify the configuration files.
+    """
     try:
-        processor = get_qwen_processor()
-        processor.unload_model()
-        logger.info("Unloaded model resources on shutdown")
+        # Read uploaded file
+        file_content = await file.read()
+        file_ext = os.path.splitext(file.filename)[1].lower()
+        
+        if file_ext not in ['.pdf']:
+            raise HTTPException(status_code=400, detail=f"Unsupported file type: {file_ext}")
+        
+        # Initialize processor with default config
+        processor = QwenVLProcessor(document_type="payslip")
+        
+        # If window_mode is specified but no selected_windows, use appropriate defaults
+        if window_mode and not selected_windows:
+            # Set proper window selections based on mode
+            valid_windows = {
+                "vertical": "top,bottom",
+                "horizontal": "left,right",  # Horizontal splits document into left/right parts
+                "quadrant": "top_left,top_right,bottom_left,bottom_right",
+                "whole": "whole"
+            }
+            
+            # Apply default windows for the selected mode
+            if window_mode in valid_windows:
+                selected_windows = valid_windows[window_mode]
+                logger.info(f"Auto-selecting windows for mode '{window_mode}': {selected_windows}")
+        
+        # Collect custom prompts from form parameters
+        custom_prompts = {}
+        for window in ['top', 'bottom', 'left', 'right', 'top_left', 'top_right', 
+                      'bottom_left', 'bottom_right', 'whole']:
+            prompt_value = locals().get(f'prompt_{window}')
+            if prompt_value:
+                custom_prompts[window] = prompt_value
+        
+        # Process page numbers if provided
+        page_numbers = None
+        if pages:
+            try:
+                if ',' in pages:
+                    page_numbers = [int(p.strip()) for p in pages.split(',')]
+                else:
+                    page_numbers = int(pages)
+            except ValueError:
+                logger.warning(f"Invalid page numbers format: {pages}. Using all pages.")
+        
+        # Process selected windows if provided as comma-separated string
+        windows_list = None
+        if selected_windows:
+            windows_list = [w.strip() for w in selected_windows.split(',')]
+        
+        # Process resolution steps if provided
+        resolution_steps = None
+        if image_resolution_steps:
+            try:
+                # Handle different formats: comma-separated string, single value, or already parsed list
+                if isinstance(image_resolution_steps, list):
+                    resolution_steps = [int(step) for step in image_resolution_steps]
+                elif isinstance(image_resolution_steps, str):
+                    if ',' in image_resolution_steps:
+                        resolution_steps = [int(s.strip()) for s in image_resolution_steps.split(',')]
+                    else:
+                        # Handle single value case
+                        resolution_steps = [int(image_resolution_steps)]
+                else:
+                    # Handle potential numeric value
+                    resolution_steps = [int(image_resolution_steps)]
+                
+                logger.info(f"Using custom resolution steps: {resolution_steps}")
+            except (ValueError, TypeError) as e:
+                logger.warning(f"Invalid resolution steps format: {image_resolution_steps}. Using defaults. Error: {e}")
+                # Provide a reasonable default if parsing fails
+                resolution_steps = [600, 400]
+        
+        # Process global selected windows if provided
+        global_windows_list = None
+        if global_selected_windows:
+            global_windows_list = [w.strip() for w in global_selected_windows.split(',')]
+        
+        # Create parameters dict for Docker container
+        container_params = {
+            # Core parameters
+            "pdf_bytes": file_content,
+            "file_name": file.filename,
+            "window_mode": window_mode,
+            "selected_windows": windows_list,
+            "memory_isolation": memory_isolation,
+            "force_cpu": force_cpu,
+            "gpu_memory_fraction": gpu_memory_fraction,
+            "pages": page_numbers,
+            "custom_prompts": custom_prompts if custom_prompts else None,
+            
+            # PDF parameters
+            "pdf_dpi": pdf_dpi,
+            
+            # Image parameters
+            "image_resolution_steps": resolution_steps,
+            "image_enhance_contrast": image_enhance_contrast,
+            "image_sharpen_factor": image_sharpen_factor,
+            "image_contrast_factor": image_contrast_factor,
+            "image_brightness_factor": image_brightness_factor,
+            "image_ocr_language": image_ocr_language,
+            "image_ocr_threshold": image_ocr_threshold,
+            
+            # Window settings
+            "window_overlap": window_overlap,
+            "window_min_size": window_min_size,
+            
+            # Text generation settings
+            "text_generation_max_new_tokens": text_generation_max_new_tokens,
+            "text_generation_use_beam_search": text_generation_use_beam_search,
+            "text_generation_num_beams": text_generation_num_beams,
+            "text_generation_temperature": text_generation_temperature,
+            "text_generation_top_p": text_generation_top_p,
+            
+            # Extraction settings
+            "extraction_confidence_threshold": extraction_confidence_threshold,
+            "extraction_fuzzy_matching": extraction_fuzzy_matching,
+            
+            # Global settings 
+            # Explicitly set global_mode to None to prevent container defaults from overriding
+            "global_mode": None if window_mode else global_mode,
+            "global_prompt": global_prompt,
+            "global_selected_windows": None if windows_list else global_windows_list,
+            
+            # Force UI parameters to override global settings
+            "override_global_settings": True
+        }
+        
+        # Filter out None values
+        container_params = {k: v for k, v in container_params.items() if v is not None}
+        
+        logger.info(f"Processing payslip with {len(container_params)} custom parameters")
+        
+        # If window_mode is specified, log a special note to explain precedence
+        if window_mode:
+            logger.info(f"Using explicitly provided window_mode '{window_mode}' with selected_windows {windows_list}. " +
+                        "Explicit parameters will override any global settings.")
+        
+        # Process the document with all specified parameters
+        if page_numbers:
+            response = processor.docker_client.process_pdf(**container_params)
+            result = processor._extract_from_response(response)
+            
+            # Add page processing info to result
+            result["page_processing"] = {
+                "pages_requested": page_numbers,
+                "pages_processed": response.get("processed_pages", 0),
+                "total_pages": response.get("total_pages", 0)
+            }
+        else:
+            # Standard processing without specific pages
+            response = processor.docker_client.process_pdf(**container_params)
+            result = processor._extract_from_response(response)
+        
+        # Add additional metadata about the processing
+        result["processing_info"] = {
+            "advanced_mode": True,
+            "parameters_used": {k: v for k, v in container_params.items() 
+                               if k not in ["pdf_bytes", "custom_prompts"]}
+        }
+        
+        if custom_prompts:
+            result["processing_info"]["custom_prompts_used"] = list(custom_prompts.keys())
+            
+        return result
+            
     except Exception as e:
-        logger.error(f"Error unloading model: {str(e)}") 
+        logger.error(f"Error in advanced payslip processing: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e)) 

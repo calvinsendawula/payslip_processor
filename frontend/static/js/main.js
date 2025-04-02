@@ -297,9 +297,6 @@ document.addEventListener('DOMContentLoaded', function() {
     const navItems = document.querySelectorAll('.nav-item');
     const tabContents = document.querySelectorAll('.tab-content');
     
-    // Current extracted data storage - new addition
-    let currentExtractedData = null;
-    
     navItems.forEach(item => {
         item.addEventListener('click', function() {
             // Remove active class from all nav items
@@ -322,16 +319,6 @@ document.addEventListener('DOMContentLoaded', function() {
     const payslipResults = document.getElementById('payslip-results');
     const payslipLoading = document.getElementById('payslip-loading');
     const payslipContent = document.getElementById('payslip-results-content');
-    
-    // Employee Search Functionality (new)
-    const employeeSearch = document.getElementById('employee-search');
-    const employeeIdInput = document.getElementById('employee-id');
-    const validateBtn = document.getElementById('validate-btn');
-    
-    // Hide the search container initially
-    if (employeeSearch) {
-        employeeSearch.style.display = 'none';
-    }
     
     // Setup drag and drop for payslips
     payslipDropArea.addEventListener('click', () => payslipFileInput.click());
@@ -364,45 +351,34 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     }
     
-    // Setup validation click handler (new)
-    if (validateBtn) {
-        validateBtn.addEventListener('click', validateWithEmployeeId);
-    }
-    
-    // Handle employee ID validation (new)
-    function validateWithEmployeeId() {
-        const employeeId = employeeIdInput.value.trim();
-        
-        if (!employeeId) {
-            alert('Bitte geben Sie eine Mitarbeiter-ID ein');
+    // Handle payslip upload
+    payslipUploadBtn.addEventListener('click', () => {
+        if (!payslipFileInput.files.length) {
+            alert('Bitte wählen Sie zuerst eine Datei aus');
             return;
         }
         
-        if (!currentExtractedData) {
-            alert('Keine extrahierten Daten vorhanden. Bitte laden Sie zuerst eine Gehaltsabrechnung hoch.');
-            return;
-        }
+        const file = payslipFileInput.files[0];
+        const formData = new FormData();
+        formData.append('file', file);
         
-        // Show loading state during validation
+        // Show loading state
+        payslipResults.style.display = 'block';
+        payslipLoading.style.display = 'block';
+        payslipContent.style.display = 'none';
+        
+        // Define the statusElement variable that was missing
         const statusElement = document.getElementById('payslip-status');
-        statusElement.innerHTML = '<span class="material-icons">hourglass_top</span><span>Validierung läuft...</span>';
-        statusElement.className = 'summary-item';
         
-        // Send validation request to backend
-        fetch('/validate-payslip', {
+        // Send to backend
+        fetch('/upload-payslip', {
             method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-                employeeId: employeeId,
-                extractedData: currentExtractedData
-            })
+            body: formData
         })
         .then(response => {
             if (!response.ok) {
                 return response.json().then(data => {
-                    throw new Error(data.error || 'Fehler bei der Validierung');
+                    throw new Error(data.error || 'Fehler bei der Verarbeitung der Gehaltsabrechnung');
                 });
             }
             return response.json();
@@ -441,11 +417,15 @@ document.addEventListener('DOMContentLoaded', function() {
                 nameMatch.innerHTML = '<span class="material-icons">error</span>';
                 nameMatch.className = 'detail-match match-error';
                 nameExpected.className = 'detail-expected show';
-                nameExpected.textContent = `(Erwartet: ${data.validation.name.expected})`;
+                nameExpected.textContent = `(Erwartet: ${pageData.employee.name.stored})`;
             }
             
-            // Update gross amount validation
-            if (data.validation.gross.matches) {
+            // Update payment information
+            document.getElementById('payment-gross').textContent = `${pageData.payment.gross.extracted} €`;
+            const grossMatch = document.getElementById('payment-gross-match');
+            const grossExpected = document.getElementById('payment-gross-expected');
+            
+            if (pageData.payment.gross.matches) {
                 grossMatch.innerHTML = '<span class="material-icons">check_circle</span>';
                 grossMatch.className = 'detail-match match-success';
                 grossExpected.className = 'detail-expected';
@@ -454,11 +434,14 @@ document.addEventListener('DOMContentLoaded', function() {
                 grossMatch.innerHTML = '<span class="material-icons">error</span>';
                 grossMatch.className = 'detail-match match-error';
                 grossExpected.className = 'detail-expected show';
-                grossExpected.textContent = `(Erwartet: ${data.validation.gross.expected} €)`;
+                grossExpected.textContent = `(Erwartet: ${pageData.payment.gross.stored} €)`;
             }
             
-            // Update net amount validation
-            if (data.validation.net.matches) {
+            document.getElementById('payment-net').textContent = `${pageData.payment.net.extracted} €`;
+            const netMatch = document.getElementById('payment-net-match');
+            const netExpected = document.getElementById('payment-net-expected');
+            
+            if (pageData.payment.net.matches) {
                 netMatch.innerHTML = '<span class="material-icons">check_circle</span>';
                 netMatch.className = 'detail-match match-success';
                 netExpected.className = 'detail-expected';
@@ -467,13 +450,13 @@ document.addEventListener('DOMContentLoaded', function() {
                 netMatch.innerHTML = '<span class="material-icons">error</span>';
                 netMatch.className = 'detail-match match-error';
                 netExpected.className = 'detail-expected show';
-                netExpected.textContent = `(Erwartet: ${data.validation.net.expected} €)`;
+                netExpected.textContent = `(Erwartet: ${pageData.payment.net.stored} €)`;
             }
             
             // Update overall status
-            const allMatch = data.validation.name.matches && 
-                            data.validation.gross.matches && 
-                            data.validation.net.matches;
+            const allMatch = pageData.employee.name.matches && 
+                            pageData.payment.gross.matches && 
+                            pageData.payment.net.matches;
             
             if (allMatch) {
                 statusElement.innerHTML = '<span class="material-icons">check_circle</span><span>Gehaltsabrechnung erfolgreich validiert</span>';
