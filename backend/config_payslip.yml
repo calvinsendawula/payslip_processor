@@ -1,0 +1,258 @@
+# Qwen Payslip Processor Configuration - Payslip Processing
+
+# Docker Container Configuration
+docker:
+  host: "localhost"
+  port: 27842
+  timeout: 60  # Increased timeout for processing
+
+# Processing Settings
+processing:
+  mode: "docker"  # Using Docker container for processing
+  window_mode: "vertical"  # Using vertical split (top/bottom) for batch processing
+  selected_windows:
+    - "top"
+    - "bottom"
+  force_cpu: false  # Keep GPU processing enabled
+  memory_isolation: "none"  # No memory isolation
+  gpu_memory_fraction: 0.9  # Use 90% of available GPU memory
+
+# Global Configuration (applies to all pages only when no specific settings are provided)
+global:
+  # Default prompt instructions for extraction
+  prompt_instructions: |
+    Extrahiere die folgenden Informationen aus der deutschen Gehaltsabrechnung:
+
+    1. Name des Mitarbeiters / Angestellten
+       - POSITION: Typischerweise im oberen Bereich des Dokuments
+       - MERKMALE: Vollständiger Name (Vorname und Nachname)
+       - HINWEIS: Kann neben "Mitarbeiter:" oder ähnlichen Bezeichnungen stehen
+
+    2. Bruttogehalt ("Brutto-Bezug" oder "Bruttolohn")
+       - POSITION: Meist in einer Tabelle im mittleren Bereich
+       - MERKMALE: Meist eine der größeren Zahlen, oft in Euro (€)
+       - UNTERSCHEIDE: Nicht zu verwechseln mit Werten unter "Verdienstbescheinigung" auf der linken Seite
+
+    3. Nettogehalt ("Auszahlungsbetrag")
+       - POSITION: Typischerweise ganz unten im Dokument, in diesem Bereich
+       - MERKMAL: Der Wert steht direkt neben dem Label, meist rechts ausgerichtet
+       - HINWEIS: Dies ist typischerweise die letzte Zahl im Dokument
+       - PRÜFUNG: Der Wert sollte kleiner als das Bruttogehalt sein
+
+    WICHTIG:
+    - Gib "unknown" für den Namen zurück, wenn du ihn nicht finden kannst
+    - Gib "0" für Beträge zurück, wenn du sie nicht sicher identifizieren kannst
+    - Achte auf das korrekte Format: #.###,## (mit Punkt als Tausendertrennzeichen)
+
+    Gib deine Funde als JSON zurück.
+
+# Page-Specific Configurations (override global settings)
+# Uncomment and modify if you need page-specific settings
+# pages:
+#   "1":                             # Settings for page 1
+#     mode: "quadrant"
+#     selected_windows:
+#       - "top_left"
+#       - "bottom_right"
+#   "2-3":                           # Settings for pages 2-3
+#     mode: "vertical"
+#     selected_windows:
+#       - "top"
+#       - "bottom"
+
+# Custom Prompts
+prompts:
+  # Vertical mode prompts for default processing
+  vertical:
+    top: |
+      Du siehst die obere Hälfte einer deutschen Gehaltsabrechnung.
+
+      SUCHE NACH DIESEN INFORMATIONEN:
+      1. Namen des Angestellten, meist nach "Herrn/Frau" oder unter "Name"
+      2. Bruttogehalt ("Gesamt-Brutto") falls in diesem Bereich sichtbar
+      3. Nettogehalt ("Auszahlungsbetrag") falls in diesem Bereich sichtbar
+
+      WICHTIG:
+      - Bei der Suche nach dem Namen, ignoriere Firmen- oder Versicherungsnamen
+      - Gib "unknown" für den Namen zurück, wenn du ihn nicht finden kannst
+      - Gib "0" zurück, wenn Bruttogehalt oder Nettogehalt in diesem Bereich nicht gefunden werden
+      - Achte auf das korrekte Format: #.###,## (mit Punkt als Tausendertrennzeichen)
+
+      Gib deine Funde als JSON zurück:
+      {
+      "found_in_top": {
+          "employee_name": "Name des Angestellten oder 'unknown'",
+          "gross_amount": "Bruttogehalt oder '0'",
+          "net_amount": "Nettogehalt oder '0'"
+      }
+      }
+    
+    bottom: |
+      Du siehst die untere Hälfte einer deutschen Gehaltsabrechnung.
+
+      SUCHE NACH DIESEN INFORMATIONEN:
+      1. Namen des Angestellten falls in diesem Bereich sichtbar
+      2. Bruttogehalt ("Gesamt-Brutto")
+         - WICHTIG: Es gibt möglicherweise zwei "Gesamt-Brutto" Werte!
+         - Der korrekte Wert steht meist unter dem Label "Gesamt-Brutto" auf der rechten Seite
+         - Ignoriere Werte unter "Verdienstbescheinigung" auf der linken Seite
+         - Der Wert sollte im Bereich von 1.000 € bis 10.000 € liegen
+      3. Nettogehalt ("Auszahlungsbetrag")
+         - Meist ganz unten im Dokument
+         - Der Wert steht direkt neben dem Label, oft rechts ausgerichtet
+         - Typischerweise die letzte Zahl im Dokument
+         - Der Wert sollte kleiner als das Bruttogehalt sein
+
+      WICHTIG:
+      - Gib NUR die Werte zurück, die zu diesen spezifischen Labels gehören
+      - Achte auf das korrekte Format: #.###,## (mit Punkt als Tausendertrennzeichen)
+      - Gib "unknown" für den Namen zurück, wenn du ihn nicht finden kannst
+      - Gib "0" für Beträge zurück, wenn du sie nicht sicher identifizieren kannst
+
+      Gib deine Funde als JSON zurück:
+      {
+      "found_in_bottom": {
+          "employee_name": "Name des Angestellten oder 'unknown'",
+          "gross_amount": "Bruttogehalt oder '0'",
+          "net_amount": "Nettogehalt oder '0'"
+      }
+      }
+
+  # Keep quadrant prompts for single file processing with user-specified locations
+  quadrant:
+    top_left: |
+      Du siehst den oberen linken Teil einer deutschen Gehaltsabrechnung.
+
+      SUCHE NACH DIESEN INFORMATIONEN:
+      1. Namen des Angestellten
+         - POSITION: Meistens im oberen linken Viertel des Dokuments
+         - OFT NACH: "Herrn/Frau" oder unter "Name"
+         - TYPISCH: 3-4 Zeilen unter der Personalnummer
+      2. Bruttogehalt ("Gesamt-Brutto") falls in diesem Bereich sichtbar
+      3. Nettogehalt ("Auszahlungsbetrag") falls in diesem Bereich sichtbar
+
+      WICHTIG:
+      - Ignoriere Firmen- oder Versicherungsnamen bei der Suche nach dem Angestelltennamen
+      - Gib "unknown" für den Namen zurück, wenn du ihn nicht finden kannst
+      - Gib "0" für Beträge zurück, wenn du sie nicht sicher identifizieren kannst
+      - Achte auf das korrekte Format: #.###,## (mit Punkt als Tausendertrennzeichen)
+
+      Gib deine Funde als JSON zurück:
+      {
+      "found_in_top_left": {
+          "employee_name": "Name des Angestellten oder 'unknown'",
+          "gross_amount": "Bruttogehalt oder '0'",
+          "net_amount": "Nettogehalt oder '0'"
+      }
+      }
+    
+    top_right: |
+      Du siehst den oberen rechten Teil einer deutschen Gehaltsabrechnung.
+
+      SUCHE NACH DIESEN INFORMATIONEN:
+      1. Namen des Angestellten falls in diesem Bereich sichtbar
+      2. Bruttogehalt ("Gesamt-Brutto") falls in diesem Bereich sichtbar
+      3. Nettogehalt ("Auszahlungsbetrag") falls in diesem Bereich sichtbar
+
+      WICHTIG:
+      - Gib "unknown" für den Namen zurück, wenn du ihn nicht finden kannst
+      - Gib "0" für Beträge zurück, wenn du sie nicht sicher identifizieren kannst
+      - Achte auf das korrekte Format: #.###,## (mit Punkt als Tausendertrennzeichen)
+
+      Gib deine Funde als JSON zurück:
+      {
+      "found_in_top_right": {
+          "employee_name": "Name des Angestellten oder 'unknown'",
+          "gross_amount": "Bruttogehalt oder '0'",
+          "net_amount": "Nettogehalt oder '0'"
+      }
+      }
+
+    bottom_left: |
+      Du siehst den unteren linken Teil einer deutschen Gehaltsabrechnung.
+
+      SUCHE NACH DIESEN INFORMATIONEN:
+      1. Namen des Angestellten falls in diesem Bereich sichtbar
+      2. Bruttogehalt ("Gesamt-Brutto") falls in diesem Bereich sichtbar
+         - WICHTIG: In diesem Bereich findest du möglicherweise ein "Gesamt-Brutto" unter "Verdienstbescheinigung"
+         - Diese Werte sind NICHT die korrekten Werte, die wir suchen
+         - Der korrekte Wert befindet sich normalerweise auf der rechten Seite
+      3. Nettogehalt ("Auszahlungsbetrag") falls in diesem Bereich sichtbar
+
+      WICHTIG:
+      - Gib "unknown" für den Namen zurück, wenn du ihn nicht finden kannst
+      - Gib "0" für Beträge zurück, wenn du sie nicht sicher identifizieren kannst
+      - Achte auf das korrekte Format: #.###,## (mit Punkt als Tausendertrennzeichen)
+
+      Gib deine Funde als JSON zurück:
+      {
+      "found_in_bottom_left": {
+          "employee_name": "Name des Angestellten oder 'unknown'",
+          "gross_amount": "Bruttogehalt oder '0'",
+          "net_amount": "Nettogehalt oder '0'"
+      }
+      }
+    
+    bottom_right: |
+      Du siehst den unteren rechten Teil einer deutschen Gehaltsabrechnung.
+
+      SUCHE NACH DIESEN INFORMATIONEN:
+      1. Namen des Angestellten falls in diesem Bereich sichtbar
+      2. Bruttogehalt ("Gesamt-Brutto")
+         - POSITION: In diesem Bereich, unter dem Label "Gesamt-Brutto"
+         - MERKMALE: Der Wert sollte im Bereich von 1.000 € bis 10.000 € liegen
+         - UNTERSCHEIDE: Nicht zu verwechseln mit Werten unter "Verdienstbescheinigung" auf der linken Seite
+      3. Nettogehalt ("Auszahlungsbetrag")
+         - POSITION: Typischerweise ganz unten im Dokument, in diesem Bereich
+         - MERKMAL: Der Wert steht direkt neben dem Label, meist rechts ausgerichtet
+         - HINWEIS: Dies ist typischerweise die letzte Zahl im Dokument
+         - PRÜFUNG: Der Wert sollte kleiner als das Bruttogehalt sein
+
+      WICHTIG:
+      - Gib "unknown" für den Namen zurück, wenn du ihn nicht finden kannst
+      - Gib "0" für Beträge zurück, wenn du sie nicht sicher identifizieren kannst
+      - Achte auf das korrekte Format: #.###,## (mit Punkt als Tausendertrennzeichen)
+
+      Gib deine Funde als JSON zurück:
+      {
+      "found_in_bottom_right": {
+          "employee_name": "unknown",
+          "gross_amount": "Bruttogehalt oder '0'",
+          "net_amount": "Nettogehalt oder '0'"
+      }
+      }
+
+# Processing Settings
+extraction:
+  confidence_threshold: 0.7
+  fuzzy_matching: true
+
+# PDF Processing Settings
+pdf:
+  dpi: 350  # Reduced DPI to save memory
+
+# Image Processing Settings
+image:
+  resolution_steps: [600, 400]  # Fixed to explicitly use a list of integers
+  enhance_contrast: true
+  sharpen_factor: 2.0
+  contrast_factor: 1.5
+  brightness_factor: 1.1
+  ocr_language: eng
+  ocr_threshold: 90
+  min_size: 100
+
+# Window Settings
+window:
+  window_mode: vertical
+  overlap: 0.1  # Renamed from window_overlap
+  min_size: 100  # Renamed from window_min_size
+  selected_windows: [top, bottom]
+
+# Text Generation Settings
+text_generation:
+  max_new_tokens: 768
+  use_beam_search: false
+  num_beams: 1
+  temperature: 0.1
+  top_p: 0.95 

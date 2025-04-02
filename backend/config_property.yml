@@ -1,0 +1,109 @@
+# Qwen Payslip Processor Configuration - Property Listing Processing
+
+# Docker Container Configuration
+docker:
+  host: "localhost"
+  port: 27842
+  timeout: 60  # Increased timeout for processing
+
+# Processing Settings
+processing:
+  mode: "docker"  # Using Docker container for processing
+  window_mode: "whole"  # Use whole image mode for property listings
+  selected_windows: []  # Not applicable for whole mode
+  force_cpu: false  # Keep GPU processing enabled
+  memory_isolation: "strict"  # Use strict isolation to reduce memory usage
+  gpu_memory_fraction: 0.7  # Use only 70% of available GPU memory
+
+# Global Configuration
+global:
+  mode: whole
+  # Prompt instructions for property listings
+  prompt_instructions: |
+    Extrahiere die folgenden Informationen aus diesem Immobilienangebot oder dieser Immobilienanzeige:
+
+    1. Wohnfläche (in Quadratmetern, m²)
+       - POSITION: Typischerweise im Hauptteil des Dokuments, in der Eigenschaftsauflistung
+       - MERKMALE: Suche nach "Wohnfläche", "Wfl.", "Größe", "m²", "qm" 
+       - FORMAT: Zahl gefolgt von "m²", "qm" oder andere Varianten
+
+    2. Kaufpreis (in Euro, €)
+       - POSITION: Oft hervorgehoben, kann oben oder im Hauptteil stehen
+       - MERKMALE: Suche nach "Preis", "Kaufpreis", "€", "EUR"
+       - FORMAT: Zahl gefolgt von "€", "EUR" oder Währungssymbol
+
+    WICHTIG:
+    - Ignoriere Nebenkosten, Grundsteuer, Provision oder andere Gebühren
+    - Gib "0" zurück, wenn du einen Wert nicht eindeutig identifizieren kannst
+    - Gib nur die numerischen Werte zurück (Zahl ohne Einheit)
+    - Achte auf die korrekte Zahlenformatierung: Punkte als Tausendertrennzeichen, Komma als Dezimaltrennzeichen
+
+    Antworte nur mit einem JSON-Objekt:
+    {
+      "living_space": "Wohnfläche in m² (nur Zahl)",
+      "purchase_price": "Kaufpreis in € (nur Zahl)"
+    }
+
+# Page-Specific Configurations (override global settings)
+# Uncomment and modify if you need page-specific settings
+# pages:
+#   "1":                             # Settings for page 1
+#     mode: "whole"
+#     prompt: "Extract property details from first page"
+#   "2-3":                           # Settings for pages 2-3
+#     mode: "whole"
+#     prompt: "Extract additional property details"
+
+# Custom Prompts
+prompts:
+  # Only include whole mode prompt for property listings
+  whole:
+    whole: |
+      Analysiere dieses Immobilienangebot. Du musst folgende spezifische Informationen finden und extrahieren:
+
+      1. Die Wohnfläche (in Quadratmetern, m²)
+      2. Den Kaufpreis (in Euro, €)
+
+      Gib die extrahierten Werte in dieser JSON-Struktur zurück:
+      {
+        "found_in_whole": {
+          "living_space": "<exakter Text für die Wohnfläche, inklusive Einheit>",
+          "purchase_price": "<exakter Text für den Kaufpreis, inklusive Währungssymbol>"
+        }
+      }
+
+      Regeln:
+      - Extrahiere die Werte EXAKT wie sie erscheinen
+      - Gib nur die JSON-Struktur zurück
+      - Wenn du einen Wert nicht klar lesen kannst, gib "nicht gefunden" zurück
+      - Erfinde oder rate keine Werte
+
+# Processing Settings
+extraction:
+  confidence_threshold: 0.7
+  fuzzy_matching: true
+
+# PDF Processing Settings
+pdf:
+  dpi: 250  # Reduced DPI to save memory
+
+# Image Processing Settings
+image:
+  resolution_steps: [600, 500, 400, 350]  # Fixed to explicitly use a list of integers
+  enhance_contrast: true
+  sharpen_factor: 2.0
+  contrast_factor: 1.5
+  brightness_factor: 1.1
+
+# Window Settings
+window:
+  overlap: 0.1
+  min_size: 100
+
+# Text Generation Settings
+text_generation:
+  max_new_tokens: 512  # Reduced from 768 to save memory
+  use_beam_search: false
+  num_beams: 1
+  temperature: 0.1
+  top_p: 0.95 

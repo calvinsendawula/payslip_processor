@@ -1,279 +1,329 @@
-# Payslip Processor with Qwen2.5-VL-7B
+# Qwen Payslip Processor
 
-A FastAPI application that processes German payslips using the Qwen2.5-VL-7B vision-language model.
+A Docker-based Python application for processing German payslips and property listings using the Qwen2.5-VL-7B vision-language model.
 
-![DokProz](https://github.com/user-attachments/assets/00d063af-e50a-431e-b468-04ffaa75f3a5)
+## Quick Start (2 Simple Steps)
 
-## ⚠️ Important Notes - Please Read First
-
-This application is currently optimized for processing a specific payslip format (sample_payslip_v2.pdf). The vision-language model has been specifically trained with prompts tailored to this document structure.
-
-### Key Points to Understand
-- The application is NOT a generic payslip processor
-- Each different payslip format requires specific guidance
-- Current implementation extracts:
-  - Employee name (from top section after "Herrn/Frau")
-  - Gross amount (Gesamt-Brutto from top-right corner)
-  - Net amount (Auszahlungsbetrag from bottom-right corner)
-- The model CAN process any document type but needs specific guidance for each new format
-
-## Resolution Settings and Processing Time
-The application uses a progressive resolution approach starting from a high resolution (default: 1500px) and gradually reducing it if needed depending on the capabliities of your GPU. This affects processing time significantly:
-
-- Higher initial resolution = Better accuracy but slower processing
-- Lower initial resolution = Faster processing but potentially reduced accuracy
-- Processing time varies based on your GPU's VRAM:
-  - Example: With 8GB VRAM (5GB used by model):
-    - 1500px resolution: ~14 minutes per page (high accuracy)
-    - Lower resolutions: Significantly faster but may reduce accuracy
-
-You can adjust these settings in `backend/config.yml`:
-```yaml
-image:
-  initial_resolution: 1500  # Starting resolution
-  resolution_steps: [1500, 1200, 1000, 800, 600]  # Progressive reduction steps
-```
-
-> **Important Notes**: 
-> - The `initial_resolution` must be less than or equal to the first value in the `resolution_steps` list
-> - While you can reduce the resolution steps to speed up processing, always keep at least one value in the list
-> - For optimal performance, experiment with different resolution values to find the right balance between speed and accuracy for your specific GPU
-
-### Recommended Parameter Ranges
-For the best balance between processing time and accuracy, consider these ranges:
-
-| Parameter | Minimum | Recommended | Maximum | Notes |
-|-----------|---------|-------------|---------|-------|
-| `initial_resolution` | 600 | 1000-1200 | 1500 | Higher values significantly increase processing time |
-| `resolution_steps` | Single value | 2-3 values | 5 values | More steps = more attempts but longer processing |
-| `pdf.dpi` | 300 | 450 | 600 | Higher DPI values capture more detail but require more memory |
-
-These ranges are based on how practical it would be to run the program. For most 8GB+ VRAM GPUs:
-- Starting at 1000px resolution offers a good balance
-- Starting at 1500px provides the highest accuracy
-- Values below 600px may miss small text or details
-- Values above 1500px rarely provide additional accuracy but greatly increase processing time
-
-## System Requirements
-
-### Hardware Requirements
-- **GPU**: CUDA-capable NVIDIA GPU
-- **VRAM (Video RAM) Requirements:**
-  - Minimum: 8GB VRAM (non-negotiable)
-  - Recommended: 12GB VRAM or more
-  - Example compatible GPUs:
-    - NVIDIA RTX 3060 (12GB VRAM)
-    - NVIDIA RTX 3080 (10GB VRAM)
-    - NVIDIA RTX 4070 (12GB VRAM)
-    - Or any GPU with 8GB+ VRAM
-  - Note: VRAM capacity is more important than GPU processing power
-
-### Software Requirements
-- **Python Version:**
-  - Required: Python 3.10 or higher
-  - Recommended: Python 3.11.5
-- **Disk Space:** ~7GB for model files
-- **Operating System:** Windows, Linux, or macOS
-- **PDF Processing Tools:**
-  - Windows: Poppler (added to PATH)
-  - Linux: poppler-utils
-  - macOS: poppler via homebrew
-
-## Setup Instructions
-
-### 1. Environment Setup
-```bash
-# Create virtual environment
-# Windows
-python -m venv venv
-.\venv\Scripts\activate
-
-# Linux/macOS
-python3 -m venv venv
-source venv/bin/activate
-
-# Install dependencies
-pip install -r requirements.txt
-
-# Install PyTorch with CUDA support
-pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
-```
-
-### 2. Install PDF Processing Tools
-
-**For Windows:**
-1. Download Poppler from https://github.com/oschwartz10612/poppler-windows/releases/
-2. Install and add the `bin` directory to your system's PATH
-3. Verify installation by running `pdfinfo -v` in a new terminal
-
-**For Linux:**
-```bash
-sudo apt-get install -y poppler-utils
-```
-
-**For macOS:**
-```bash
-brew install poppler
-```
-
-### 3. Model Setup and Configuration
+The fastest way to get up and running:
 
 ```bash
-# Download and cache model files (one-time setup, ~7GB)
-cd backend
-python setup_model.py
+# Step 1: Clone the repository
+git clone https://github.com/calvinsendawula/payslip_processor.git
+cd payslip_processor
+
+# Step 2: Run the all-in-one starter script
+# On Windows:
+start_app.bat
+
+# On Linux/macOS:
+chmod +x start_app.sh
+./start_app.sh
 ```
 
-> **IMPORTANT**: This downloads the Qwen2.5-VL-7B model (approximately 7GB) to a local `model_cache` folder in your project. This step must be completed once before using the application.
->
-> The download takes 15-30 minutes depending on your internet connection. After completion, the application will use these cached files without redownloading.
+That's it! The script automatically:
+- Ensures Docker is running
+- Downloads and starts the Docker container with GPU support when available
+- Sets up Python environment and dependencies
+- Launches backend and frontend services
+- Opens your browser to the UI at http://localhost:5173
 
-The application uses dynamic memory management:
-- Default: No explicit memory limit (uses up to 90% of available VRAM)
-- To restrict memory usage, modify `backend/config.yaml`:
-  ```yaml
-  model:
-    memory_limit_gb: 0  # This is currently set to 0 so the model will use whatever VRAM is available to it
-  ```
-
-### 4. Database Setup
-```bash
-cd backend
-python -m app.seed_db
-```
-
-### 5. Start the Application
-```bash
-# Terminal 1 - Start backend
-cd backend
-uvicorn app.main:app --reload
-
-# Terminal 2 - Start frontend
-cd frontend
-python app.py
-```
-
-Access the application at http://localhost:5173
-
-## Testing the Application
-
-### Sample Payslip Processing
-1. Use `sample_payslip_v2.pdf` for testing
-2. Expected values:
-   - Employee Name: "Erika Mustermann"
-   - Gross Amount: 2124.00
-   - Net Amount: 1374.78
-
-
-## Logging
-
-The application creates detailed logs of all processing operations in:
-```
-backend/logs/payslip_processor.log
-```
-
-Log entries include:
-- Timestamps for all operations
-- Processing times for document extraction and validation
-- Clear session separation between application runs
-- Warning and error messages with detailed information
-- Validation results and success/failure indicators
-
-Logs are appended to the same file across multiple runs for easy troubleshooting and performance monitoring.
-
-## Processing Different Payslip Formats
-
-To adapt the system for different payslip formats:
-1. Modify prompts in `backend/app/qwen_processor.py`
-2. Update:
-   - Field location descriptions
-   - Search patterns and labels
-   - Validation rules if needed
-
-## Technical Architecture
-
-- **Backend:** FastAPI
-- **Frontend:** HTML + CSS
-- **Model:** Qwen2.5-VL-7B vision-language model
-- **Processing:** Sliding window approach with progressive resolution
-- **Database:** SQLite with SQLAlchemy ORM
-
-## Performance Considerations
-
-- First-time processing may be slower due to GPU memory allocation
-- Subsequent processing is faster
-- Performance factors:
-  - Available VRAM (more = faster processing)
-  - Memory allocation settings in config.yaml
-  - GPU acceleration is crucial for reasonable performance
-  - Image resolution settings significantly impact processing time
-
-## Troubleshooting
-
-### Model Loading Issues
-1. Verify `setup_model.py` completed successfully
-2. Check `model_cache` directory contains model files
-3. Verify CUDA availability:
-   ```python
-   python -c "import torch; print(torch.cuda.is_available())"
-   ```
-
-### PDF Processing Errors
-1. Verify Poppler installation and PATH
-2. Test PDF conversion manually
-3. Check PDF is not corrupted or password-protected
-
-## Support
-
-For processing new payslip formats, provide:
-1. Sample payslip (sensitive data redacted)
-2. List of fields to extract
-3. Clear indication of field locations
-
-## Limitations
-
-- Optimized for specific payslip format only
-- Requires significant VRAM (8GB minimum)
-- Not suitable for batch processing of varied formats
-- Requires prompt engineering for new formats
-- GPU required for practical use
+The application will process both payslips and property listings, detecting and using your GPU if available.
 
 ## Overview
 
-This application provides a complete solution for:
-- Extracting employee information and payment details from German payslips
-- Processing property listing documents to extract property details
-- Validating extracted information against database records
-- User-friendly interface for document upload and result viewing
+This application is designed for processing German documents:
+- **Payslips**: Extracts employee name, gross amount, and net amount
+- **Property Listings**: Extracts living space (m²) and purchase price (€)
 
-The system uses a sliding window approach with the powerful Qwen2.5-VL-7B model for accurate data extraction from images and PDFs.
+The system works in **air-gapped environments** (environments without internet access):
 
-## Project Structure
+1. **Docker Container**: Contains the entire Qwen2.5-VL model and processing logic
+2. **Backend**: FastAPI service that communicates with the Docker container
+3. **Frontend**: Flask web interface for uploading and validating documents
+
+## System Requirements
+
+### Minimum Requirements (CPU Mode)
+- **CPU**: Quad-core CPU (8 threads recommended)
+- **RAM**: 8GB for Docker container + 2GB for application (12GB total recommended)
+- **Disk Space**: 15GB for Docker image and container
+- **Docker**: Docker Engine/CLI (Docker Desktop not required)
+- **Python**: 3.11+ for the backend and frontend
+- **Network**: Internet connection (only needed for initial Docker image download)
+
+### Recommended Requirements (GPU Mode)
+- **CPU**: 8+ cores
+- **RAM**: 16GB system RAM
+- **GPU**: 
+  - NVIDIA GPU with 8GB+ VRAM and CUDA support
+  - OR Apple Silicon M1/M2/M3 (Metal acceleration)
+- **Disk Space**: 20GB free space
+- **Docker**: Docker Engine with GPU support
+- **GPU Drivers**:
+  - For NVIDIA: Latest NVIDIA drivers and NVIDIA Container Toolkit installed
+
+## Download and Startup Times
+
+**Important**: The Docker image is large (~14GB) and requires significant download and startup time:
+
+- **Download time**: 
+  - On a 200Mbps connection: 15-30 minutes
+  - On a 100Mbps connection: 30-60 minutes
+  - On slower connections: 1+ hour
+  
+- **Initial startup time**: 5-10 minutes while the model loads into memory
+
+The container is ready when you see this in the logs (`docker logs qwen-payslip-processor`):
+```
+Loading checkpoint shards: 100%|██████████| 4/4 [00:07<00:00,  1.93s/it]
+INFO:qwen_payslip_processor.processor:Model loaded successfully!
+INFO:server:Model loaded and ready to serve requests
+INFO:     Uvicorn running on http://0.0.0.0:27842 (Press CTRL+C to quit)
+```
+
+Do not interrupt the download or startup process. The backend will automatically detect when the container is ready.
+
+## Docker Environment Setup
+
+For optimal performance, especially with the large model in the Docker container:
+
+### Windows with WSL2
+
+Create a `.wslconfig` file in your Windows user profile directory (`%USERPROFILE%\.wslconfig`) with:
 
 ```
-payslip_processor/
-├── backend/                 # FastAPI backend
-│   ├── app/                # Main application code
-│   ├── config.yml          # Configuration settings
-│   ├── setup_model.py      # Model setup script
-│   └── payslips.db         # SQLite database
-├── frontend/               # frontend
-│   ├── app.py             # Main frontend application
-│   ├── static/            # Static assets
-│   ├── templates/         # HTML templates
-│   └── uploads/           # Temporary upload directory
-├── model_cache/           # Cached model files
-├── sample/                # Sample documents
-└── requirements.txt       # Python dependencies
+[wsl2]
+memory=16GB
+processors=8
+swap=32GB
+gpuSupport=true
 ```
 
-## Database Schema
+Then restart Docker Desktop completely.
 
-The SQLite database contains the following tables:
-- `payslips`: Stores processed payslip information
-  - `id`: Unique identifier
-  - `employee_name`: Extracted employee name
-  - `gross_amount`: Gross salary amount
-  - `net_amount`: Net salary amount
-  - `processed_date`: Timestamp of processing
-  - `file_path`: Path to original document
+### Docker Desktop Settings
+
+1. Go to Docker Desktop → Settings → Resources
+2. Allocate at least 8GB RAM (12GB+ recommended)
+3. Increase Swap space to at least 4GB
+4. For GPU support, ensure "Use GPU" is enabled (if available)
+
+## Air-Gapped Operation
+
+This application is specifically designed to work in completely isolated environments without internet access:
+
+### Setup for Air-Gapped Environment
+
+1. **Download and package required assets** on a machine with internet access:
+   ```bash
+   # Download Docker image
+   docker pull calvin189/qwen-payslip-processor:latest
+   docker save calvin189/qwen-payslip-processor:latest > qwen-payslip-processor.tar
+   
+   # Clone and package the application
+   git clone https://github.com/calvinsendawula/payslip_processor.git
+   cd payslip_processor
+   
+   # Install dependencies in a temporary venv to include in the package
+   python -m venv temp_venv
+   source temp_venv/bin/activate  # Windows: temp_venv\Scripts\activate
+   pip install -r requirements.txt
+   pip install -r backend/requirements.txt  
+   pip install -r frontend/requirements.txt
+   deactivate
+   
+   # Package everything
+   tar -czvf payslip-processor.tar.gz *
+   ```
+
+2. **Transfer files** to the air-gapped environment:
+   - `qwen-payslip-processor.tar` (Docker image)
+   - `payslip-processor.tar.gz` (Application code)
+
+3. **Deploy on air-gapped machine**:
+   ```bash
+   # Load Docker image
+   docker load < qwen-payslip-processor.tar
+   
+   # Unpack application
+   mkdir payslip-processor
+   tar -xzvf payslip-processor.tar.gz -C payslip-processor
+   cd payslip-processor
+   
+   # Run the application
+   ./start_app.sh  # or start_app.bat on Windows
+   ```
+
+### Air-Gapped Features
+
+- **No internet dependencies**: All required files are packaged within the application:
+  - Local fonts instead of Google Fonts CDN
+  - Local Material icons instead of external CDN
+  - Offline documentation and error messages
+  
+- **No model downloads**: The complete Qwen2.5-VL model (14GB+) is pre-packaged in the Docker image
+
+- **Works with Docker CLI**: Docker Desktop is not required, only the Docker Engine/CLI
+
+- **Self-contained setup scripts**: All virtual environment setup is handled automatically
+
+## Docker-Based Architecture
+
+The application is designed to work exclusively with the Docker container:
+
+- **No Local Model**: The 14GB+ model is entirely contained within the Docker image
+- **Port-Based Detection**: The backend automatically detects if the Docker container is running
+- **GPU Acceleration**: Automatically detects and uses GPU if available
+- **Complete Configuration**: All parameters are configured via the config files
+- **Multi-Window Processing**: Documents can be divided into regions for targeted extraction
+- **Custom German Prompts**: Specific instructions for the model in German language
+
+## Detailed Setup Instructions
+
+### Recommended: One-Click Automatic Setup
+
+Our one-click script `start_app.bat` (Windows) or `start_app.sh` (Linux/macOS) handles everything automatically:
+
+```bash
+# Windows (Command Prompt)
+start_app.bat
+
+# Linux/macOS
+chmod +x start_app.sh
+./start_app.sh
+```
+
+These scripts will:
+1. Check if the Docker container is running and start it if needed
+2. Set up a Python virtual environment (`.venv`) if it doesn't exist
+3. Install all required dependencies in the virtual environment
+4. Start the backend server
+5. Start the frontend web interface
+6. Open the application in your browser
+
+**First-time startup process** includes these automatic steps:
+1. Checking if Docker is installed and running
+2. Verifying if Docker image exists locally, if not:
+   - Downloading the Docker image (~14GB, 15-60+ minutes depending on connection)
+3. Creating and starting the container:
+   - Detecting GPU availability and using it if present
+   - Configuring appropriate memory settings
+4. Creating a Python virtual environment in the root directory
+5. Installing dependencies in the virtual environment
+6. Starting backend and frontend with required dependencies
+7. Opening the web interface once services are ready
+
+The total time for first setup can be 20-90 minutes depending on your internet speed and hardware. Subsequent startups will be much faster (typically under 1 minute if the container already exists).
+
+### For Troubleshooting: Manual Setup
+
+If you need to start components individually:
+
+#### 1. Start the Docker Container
+
+Use our scripts that automatically detect your system configuration and GPU availability:
+
+```bash
+# Windows (Command Prompt)
+start_docker.bat
+
+# Windows (PowerShell)
+./start_docker.ps1
+
+# Linux/macOS
+chmod +x start_docker.sh
+./start_docker.sh
+```
+
+#### 2. Start the Backend
+
+```bash
+cd backend
+pip install -r requirements.txt
+uvicorn app.main:app --reload --port 8000
+```
+
+#### 3. Start the Frontend
+
+```bash
+cd frontend
+pip install -r requirements.txt
+python app.py
+```
+
+Then open your browser to: http://localhost:5173
+
+## Usage
+
+1. Ensure the Docker container is running (green indicator in the UI)
+2. Upload a German payslip (PDF, JPG, PNG)
+3. View the extracted information
+4. (Optional) Enter an employee ID to validate the extracted data
+
+## Configuration
+
+The system is configured via the `backend/config.yml` file. A comprehensive example with all possible options is available in `config_example.yml`.
+
+For this project, we're using the quadrant window mode with only top_left and bottom_right windows being processed:
+
+```yaml
+# Processing Settings
+processing:
+  mode: "direct"
+  window_mode: "quadrant"  # Divide the document into four quadrants
+  selected_windows:        # Only process these specific quadrants
+    - "top_left"           # Contains employee name
+    - "bottom_right"       # Contains net amount
+```
+
+### Custom Prompts
+
+You can customize the instructions sent to the model for each window using multiline YAML strings:
+
+```yaml
+prompts:
+  quadrant:
+    top_left: |
+      Extract employee name from this part of the German payslip.
+      Look for text after 'Name' or 'Herrn/Frau'.
+      Return JSON: {"found_in_top_left": {"employee_name": "NAME"}}
+```
+
+## Docker Container API
+
+The Docker container exposes these endpoints:
+
+- `/process/pdf` - Process PDF files
+- `/process/image` - Process image files
+- `/status` - Get container status and GPU information
+
+The container accepts custom processing parameters including window modes and custom prompts.
+
+## Troubleshooting
+
+- **No Docker Container**: If the status indicator is red, ensure Docker is running with:
+  ```bash
+  docker ps | grep qwen-payslip-processor
+  ```
+  
+- **Container Issues**: If needed, restart the container:
+  ```bash
+  docker restart qwen-payslip-processor
+  ```
+
+- **Memory Errors**: If you encounter "Out of Memory" errors when pulling or running the container:
+  1. Stop all running Docker containers: `docker stop $(docker ps -q)`
+  2. For Windows: Configure WSL2 memory settings in `.wslconfig`
+  3. For all platforms: Increase Docker Desktop memory allocation
+  4. Restart Docker Desktop completely
+
+- **GPU Issues**: If GPU acceleration isn't working:
+  1. Ensure your GPU drivers are up to date
+  2. For NVIDIA: Install NVIDIA Container Toolkit
+  3. Check Docker logs: `docker logs qwen-payslip-processor`
+
+- **Logs**: Check backend logs in `backend/logs/payslip_processor.log`
+
+## License
+
+MIT

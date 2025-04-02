@@ -1,0 +1,144 @@
+# Qwen Payslip Processor Configuration Example
+# This file contains ALL possible configuration options with explanations.
+# You can use this as a reference when creating your own configuration files.
+
+# Docker Container Configuration
+# Controls how the backend communicates with the Docker container running the model
+docker:
+  host: "localhost"                # Docker container host address (use IP address if running on a different machine)
+  port: 27842                      # Docker container port number (must match the port exposed in the container)
+  timeout: 30                      # HTTP request timeout in seconds
+
+# Main Processing Settings
+processing:
+  mode: "docker"                   # Processing mode: "docker" (use Docker container) or "local" (use local model)
+  window_mode: "quadrant"          # Window division mode: "whole", "vertical", "horizontal", "quadrant", or "auto"
+  selected_windows:                # Which windows to process based on window_mode
+    - "top_left"                   # For vertical mode: "top", "bottom"
+    - "bottom_right"               # For horizontal mode: "left", "right"
+                                   # For quadrant mode: "top_left", "top_right", "bottom_left", "bottom_right"
+                                   # For "whole" mode: parameter is ignored
+  force_cpu: false                 # Whether to force CPU usage even if GPU is available
+  memory_isolation: "auto"         # Memory isolation mode: "none", "medium", "strict", or "auto"
+                                   # "none": No isolation (fastest but may have context bleeding)
+                                   # "medium": Uses prompt engineering to prevent context bleeding (balanced)
+                                   # "strict": Complete process isolation for each window (slow but reliable)
+                                   # "auto": Automatically select based on hardware
+
+# Global Configuration (applies to all pages by default)
+global:
+  mode: "quadrant"                 # Default window mode for all pages
+  selected_windows:                # Default selected windows for all pages
+    - "top_left"
+    - "bottom_right"
+
+# Page-Specific Configurations (override global settings)
+pages:
+  "1":                             # Settings for page 1
+    mode: "quadrant"
+    selected_windows:
+      - "top_left"
+      - "bottom_right"
+    prompt: "Extract information from the first page" # Optional custom prompt for page 1
+  "2-3":                           # Settings for pages 2-3
+    mode: "vertical"
+    selected_windows:
+      - "top"
+      - "bottom"
+  "4,6-8":                         # Settings for pages 4, 6, 7, and 8
+    mode: "auto"                   # Auto-detect best mode
+    prompt: "Extract any additional information"
+
+# Custom Prompts
+# Specific instructions for the model when processing different regions of the document
+# You can use multiline YAML strings with the | character
+prompts:
+  # Vertical mode prompts (top/bottom)
+  vertical:
+    top: |
+      Extract employee details from this German payslip.
+      Look for the employee name, especially after 'Name' or 'Herrn/Frau'.
+      Return JSON: {"found_in_top": {"employee_name": "NAME", "gross_amount": "0", "net_amount": "0"}}
+    bottom: |
+      Extract payment information from this German payslip.
+      Look for gross amount (Gesamt-Brutto) and net amount (Auszahlungsbetrag).
+      Return JSON: {"found_in_bottom": {"employee_name": "unknown", "gross_amount": "AMOUNT", "net_amount": "AMOUNT"}}
+  
+  # Horizontal mode prompts (left/right)
+  horizontal:
+    left: |
+      Extract employee details from this German payslip.
+      Look for the employee name, especially after 'Name' or 'Herrn/Frau'.
+      Return JSON: {"found_in_left": {"employee_name": "NAME", "gross_amount": "0", "net_amount": "0"}}
+    right: |
+      Extract payment information from this German payslip.
+      Look for gross amount (Gesamt-Brutto) and net amount (Auszahlungsbetrag).
+      Return JSON: {"found_in_right": {"employee_name": "unknown", "gross_amount": "AMOUNT", "net_amount": "AMOUNT"}}
+  
+  # Quadrant mode prompts (top_left, top_right, bottom_left, bottom_right)
+  quadrant:
+    top_left: |
+      Extract employee name from this part of the German payslip.
+      Look for text after 'Name' or 'Herrn/Frau'.
+      Return JSON: {"found_in_top_left": {"employee_name": "NAME", "gross_amount": "0", "net_amount": "0"}}
+    top_right: |
+      Look for any identifier numbers in this part of the German payslip.
+      Return JSON: {"found_in_top_right": {"identifier": "NUMBER", "gross_amount": "AMOUNT"}}
+    bottom_left: |
+      Extract gross amount (Gesamt-Brutto) from this part of the German payslip.
+      Return JSON: {"found_in_bottom_left": {"gross_amount": "AMOUNT"}}
+    bottom_right: |
+      Extract net amount (Auszahlungsbetrag) from this part of the German payslip.
+      Return JSON: {"found_in_bottom_right": {"net_amount": "AMOUNT"}}
+  
+  # Whole document prompt (used when window_mode is "whole")
+  whole:
+    whole: |
+      Extract all information from this German payslip.
+      Look for employee name (after 'Name' or 'Herrn/Frau'), gross amount (Gesamt-Brutto), and net amount (Auszahlungsbetrag).
+      Return JSON: {"found_in_whole": {"employee_name": "NAME", "gross_amount": "AMOUNT", "net_amount": "AMOUNT"}}
+
+# Extraction Settings
+# Controls how values are extracted from model outputs
+extraction:
+  confidence_threshold: 0.7        # Minimum confidence for extracted values (0.0-1.0)
+  fuzzy_matching: true             # Use fuzzy matching for field names
+
+# PDF Processing Settings
+pdf:
+  dpi: 600                         # PDF rendering DPI (higher means more detail but slower processing)
+                                   # Range: 150 (low quality) - 300 (medium) - 600 (high quality)
+
+# Image Processing Settings
+image:
+  # Can specify either a list of resolutions to try or a single value
+  resolution_steps:                # List of image resolutions to try (in descending order)
+    - 1500                         # Higher resolution is tried first (more accurate but uses more memory)
+    - 1200                         # If processing fails at higher resolution, lower ones are attempted
+    - 1000
+    - 800
+    - 600                          # Lowest resolution (faster but less accurate)
+  # Or single resolution:
+  # resolution_steps: 1300         # Use a single resolution value instead of a list
+  
+  enhance_contrast: true           # Apply contrast enhancement to improve text visibility
+  sharpen_factor: 2.5              # Level of sharpening to apply (1.0 to 3.0)
+  contrast_factor: 1.8             # Level of contrast enhancement (1.0 to 2.0)
+  brightness_factor: 1.1           # Level of brightness adjustment (0.8 to 1.2)
+  ocr_language: "deu"              # OCR language for potential OCR integration (German = "deu")
+  ocr_threshold: 90                # OCR confidence threshold (0-100)
+
+# Window Settings
+# Controls how the document is divided into windows for processing
+window:
+  overlap: 0.1                     # Overlap between windows (0.0-0.5, proportion of window size)
+  min_size: 100                    # Minimum window size in pixels (50+)
+
+# Text Generation Settings
+# Controls how the model generates text responses
+text_generation:
+  max_new_tokens: 768              # Maximum number of tokens to generate in response (128-1024)
+  use_beam_search: false           # Whether to use beam search for generation (slower but can be more accurate)
+  num_beams: 1                     # Number of beams for beam search (1-5, only used if use_beam_search is true)
+  temperature: 0.1                 # Generation temperature (0.1-1.0, lower = more deterministic)
+  top_p: 0.95                      # Top-p sampling parameter (0.5-1.0) 

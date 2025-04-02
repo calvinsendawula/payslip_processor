@@ -55,26 +55,17 @@
                         <h2>Gehaltsabrechnungs-Analyse</h2>
                         <div class="results-summary">
                             <div class="summary-item" id="payslip-status">
-                                <span class="material-icons">info</span>
-                                <span>Daten extrahiert. Bitte geben Sie eine Mitarbeiter-ID ein, um zu validieren.</span>
+                                <span class="material-icons">check_circle</span>
+                                <span>Gehaltsabrechnung erfolgreich validiert</span>
                             </div>
                         </div>
                         
-                        <div class="search-container" id="employee-search">
-                            <div class="search-field">
-                                <label for="employee-id">Mitarbeiter-ID:</label>
-                                <input type="text" id="employee-id" placeholder="z.B. 12345">
-                                <button id="validate-btn" class="search-btn">Validieren</button>
-                            </div>
-                            <p class="search-info">Geben Sie eine Mitarbeiter-ID ein, um die extrahierten Informationen zu validieren.</p>
-                        </div>
-
                         <div class="results-details">
                             <div class="detail-section">
                                 <h3>Mitarbeiterinformationen</h3>
                                 <div class="detail-item">
                                     <span class="detail-match" id="employee-name-match">
-                                        <span class="material-icons">pending</span>
+                                        <span class="material-icons">check_circle</span>
                                     </span>
                                     <span class="detail-label">Name:</span>
                                     <span class="detail-value" id="employee-name"></span>
@@ -86,7 +77,7 @@
                                 <h3>Zahlungsinformationen</h3>
                                 <div class="detail-item">
                                     <span class="detail-match" id="payment-gross-match">
-                                        <span class="material-icons">pending</span>
+                                        <span class="material-icons">check_circle</span>
                                     </span>
                                     <span class="detail-label">Bruttogehalt:</span>
                                     <span class="detail-value" id="payment-gross"></span>
@@ -94,7 +85,7 @@
                                 </div>
                                 <div class="detail-item">
                                     <span class="detail-match" id="payment-net-match">
-                                        <span class="material-icons">pending</span>
+                                        <span class="material-icons">check_circle</span>
                                     </span>
                                     <span class="detail-label">Nettogehalt:</span>
                                     <span class="detail-value" id="payment-net"></span>

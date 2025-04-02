@@ -30,12 +30,12 @@ def upload_payslip():
         filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
         file.save(filepath)
         
-        # Send to backend for extraction only
+        # Send to backend
         try:
             with open(filepath, 'rb') as f:
                 files = {'file': (filename, f)}
                 response = requests.post(
-                    f"{app.config['BACKEND_URL']}/api/extract-payslip", 
+                    f"{app.config['BACKEND_URL']}/api/process-payslip", 
                     files=files
                 )
             
@@ -53,28 +53,6 @@ def upload_payslip():
             # Make sure file is removed even if there's an error
             if os.path.exists(filepath):
                 os.remove(filepath)
-
-@app.route('/validate-payslip', methods=['POST'])
-def validate_payslip():
-    # Get validation data from request
-    try:
-        data = request.json
-        if not data or 'employeeId' not in data or 'extractedData' not in data:
-            return jsonify({'error': 'Invalid request data'}), 400
-        
-        # Send validation request to backend
-        response = requests.post(
-            f"{app.config['BACKEND_URL']}/api/validate-payslip-by-id",
-            json=data
-        )
-        
-        if response.status_code == 200:
-            return jsonify(response.json())
-        else:
-            return jsonify({'error': response.json().get('detail', 'Validation failed')}), response.status_code
-            
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
 
 @app.route('/upload-property', methods=['POST'])
 def upload_property():
