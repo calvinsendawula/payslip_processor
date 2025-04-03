@@ -9,7 +9,7 @@ docker:
 # Processing Settings
 processing:
   mode: "docker"  # Using Docker container for processing
-  window_mode: "vertical"  # Using vertical split (top/bottom) for batch processing
+  window_mode: "vertical"  # Using vertical split (top/bottom) for all processing
   selected_windows:
     - "top"
     - "bottom"
@@ -68,7 +68,10 @@ prompts:
       Du siehst die obere Hälfte einer deutschen Gehaltsabrechnung.
 
       SUCHE NACH DIESEN INFORMATIONEN:
-      1. Namen des Angestellten, meist nach "Herrn/Frau" oder unter "Name"
+      1. Namen des Angestellten
+         - POSITION: Typischerweise auf der LINKEN Seite, meist nach "Herrn/Frau" oder unter "Name"
+         - HINWEIS: Der Name befindet sich oft im oberen linken Drittel des Dokuments
+         - ERKENNBAR: Vollständiger Name (Vorname und Nachname)
       2. Bruttogehalt ("Gesamt-Brutto") falls in diesem Bereich sichtbar
       3. Nettogehalt ("Auszahlungsbetrag") falls in diesem Bereich sichtbar
 
@@ -93,18 +96,21 @@ prompts:
       SUCHE NACH DIESEN INFORMATIONEN:
       1. Namen des Angestellten falls in diesem Bereich sichtbar
       2. Bruttogehalt ("Gesamt-Brutto")
+         - POSITION: Suche AUSSCHLIESSLICH auf der RECHTEN Seite des Dokuments
          - WICHTIG: Es gibt möglicherweise zwei "Gesamt-Brutto" Werte!
-         - Der korrekte Wert steht meist unter dem Label "Gesamt-Brutto" auf der rechten Seite
-         - Ignoriere Werte unter "Verdienstbescheinigung" auf der linken Seite
+         - Der korrekte Wert steht IMMER unter dem Label "Gesamt-Brutto" auf der RECHTEN Seite
+         - IGNORIERE KOMPLETT alle Werte unter "Verdienstbescheinigung" auf der linken Seite
          - Der Wert sollte im Bereich von 1.000 € bis 10.000 € liegen
       3. Nettogehalt ("Auszahlungsbetrag")
-         - Meist ganz unten im Dokument
-         - Der Wert steht direkt neben dem Label, oft rechts ausgerichtet
-         - Typischerweise die letzte Zahl im Dokument
-         - Der Wert sollte kleiner als das Bruttogehalt sein
+         - POSITION: Meist ganz unten auf der RECHTEN Seite des Dokuments
+         - ERKENNBAR: Der Wert steht direkt neben dem Label "Auszahlungsbetrag", rechts ausgerichtet
+         - HINWEIS: Dies ist typischerweise die letzte Zahl im Dokument
+         - PRÜFUNG: Der Wert sollte kleiner als das Bruttogehalt sein
 
       WICHTIG:
       - Gib NUR die Werte zurück, die zu diesen spezifischen Labels gehören
+      - Die wichtigsten Zahlenwerte (Brutto und Netto) sind IMMER auf der rechten Seite des Dokuments
+      - Ignoriere alle ähnlichen Werte auf der linken Seite
       - Achte auf das korrekte Format: #.###,## (mit Punkt als Tausendertrennzeichen)
       - Gib "unknown" für den Namen zurück, wenn du ihn nicht finden kannst
       - Gib "0" für Beträge zurück, wenn du sie nicht sicher identifizieren kannst

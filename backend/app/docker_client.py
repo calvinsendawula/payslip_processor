@@ -15,13 +15,13 @@ logger = logging.getLogger(__name__)
 class QwenDockerClient:
     """Client for interacting with the Qwen Payslip Processor Docker container"""
     
-    def __init__(self, host: str = "localhost", port: int = 27842, timeout: int = 30, container_name: str = "qwen-payslip-processor"):
+    def __init__(self, host: str = "localhost", port: int = 27842, timeout: int = 600, container_name: str = "qwen-payslip-processor"):
         """Initialize the Docker client
         
         Args:
             host: Hostname or IP where the Docker container is running
             port: Port number exposed by the Docker container
-            timeout: HTTP request timeout in seconds
+            timeout: HTTP request timeout in seconds (default 600 seconds = 10 minutes)
             container_name: Name of the Docker container
         """
         self.host = host
@@ -468,6 +468,9 @@ class QwenDockerClient:
                     file_name: Optional[str] = None,
                     force_cpu: bool = False,
                     gpu_memory_fraction: Optional[float] = None,
+                    # Parameters for individual window processing
+                    original_window_mode: Optional[str] = None,
+                    extract_window: Optional[str] = None,
                     # Add all new parameters from the container API
                     pdf_dpi: Optional[int] = None,
                     image_resolution_steps: Optional[List[int]] = None,
@@ -504,6 +507,8 @@ class QwenDockerClient:
             file_name: Original filename (optional)
             force_cpu: Force CPU processing even if GPU is available
             gpu_memory_fraction: Fraction of GPU memory to use (0.0-1.0)
+            original_window_mode: Original window mode when processing individual windows
+            extract_window: Specific window to extract when processing individual windows
             pdf_dpi: DPI for PDF rendering
             image_resolution_steps: List of image resolutions to try
             image_enhance_contrast: Enable contrast enhancement
@@ -553,16 +558,29 @@ class QwenDockerClient:
         # Add window mode if provided
         if window_mode is not None:
             data['window_mode'] = window_mode
+        else:
+            # Default to vertical mode if None is provided
+            data['window_mode'] = "vertical"
+            logger.warning("window_mode was None, defaulted to 'vertical'")
             
         # Add selected windows if provided
         if selected_windows is not None:
-            # If selected_windows is a list, join it to a string
             if isinstance(selected_windows, list):
-                selected_windows = ",".join(selected_windows)
-            data['selected_windows'] = selected_windows
-            # When selected_windows is explicitly provided, always override global settings
+                data['selected_windows'] = ','.join(selected_windows)
+            else:
+                data['selected_windows'] = selected_windows
+            
+            # Force override_global_settings to true when selected_windows is explicitly provided
+            # This ensures user-specified window selections take precedence over global settings
             data['override_global_settings'] = 'true'
-            logger.info(f"User-specified windows provided: {selected_windows}, enabling override_global_settings")
+            logger.info(f"Selected windows explicitly provided: {selected_windows}. Forcing override_global_settings=true")
+        else:
+            # Default to both windows for vertical mode
+            if data['window_mode'] == "vertical":
+                data['selected_windows'] = "top,bottom"
+                logger.warning("selected_windows was None for vertical mode, defaulted to 'top,bottom'")
+                # Also force override_global_settings to true
+                data['override_global_settings'] = 'true'
         
         # Add memory isolation if provided
         if memory_isolation is not None:
@@ -584,6 +602,13 @@ class QwenDockerClient:
         # Add page configs if provided
         if page_configs and isinstance(page_configs, dict):
             data['page_configs'] = json.dumps(page_configs)
+            
+        # Add individual window processing parameters if provided
+        if original_window_mode is not None:
+            data['original_window_mode'] = original_window_mode
+            
+        if extract_window is not None:
+            data['extract_window'] = extract_window
             
         # Add PDF parameters
         if pdf_dpi is not None:
@@ -720,9 +745,24 @@ class QwenDockerClient:
             data['full_config'] = json.dumps(full_config)
             logger.info(f"Sending full_config with resolution_steps as integers")
         
+        # CRITICAL: Final validation before API call to ensure window_mode is never None
+        if "window_mode" not in data or data["window_mode"] is None:
+            data["window_mode"] = "vertical"  
+            logger.warning("CRITICAL FIX: window_mode missing or None just before API call. Forced to 'vertical'")
+        
+        # CRITICAL: Final validation for selected_windows - needed for vertical mode
+        if "window_mode" in data and data["window_mode"] == "vertical" and "selected_windows" not in data:
+            data["selected_windows"] = "top,bottom"
+            logger.warning("CRITICAL FIX: selected_windows missing for vertical mode. Forced to 'top,bottom'")
+            
+        # CRITICAL: Force override_global_settings
+        data["override_global_settings"] = "true"
+        
         try:
             # Make request to container
             logger.info(f"Sending PDF to container with params: {data}")
+            logger.info(f"Critical parameters: window_mode={data.get('window_mode', 'MISSING!')}, selected_windows={data.get('selected_windows', 'MISSING!')}")
+            
             start_time = time.time()
             response = requests.post(
                 f"{self.base_url}/process/pdf",
@@ -761,6 +801,9 @@ class QwenDockerClient:
                     custom_prompts: Optional[Dict[str, str]] = None,
                     force_cpu: bool = False,
                     gpu_memory_fraction: Optional[float] = None,
+                    # Parameters for individual window processing
+                    original_window_mode: Optional[str] = None,
+                    extract_window: Optional[str] = None,
                     # Add all new parameters from the container API
                     memory_isolation: Optional[str] = None,
                     image_resolution_steps: Optional[List[int]] = None,
@@ -835,6 +878,10 @@ class QwenDockerClient:
         # Add window mode if provided
         if window_mode is not None:
             data['window_mode'] = window_mode
+        else:
+            # Default to vertical mode if None is provided
+            data['window_mode'] = "vertical"
+            logger.warning("window_mode was None, defaulted to 'vertical'")
             
         # Add selected windows if provided
         if selected_windows is not None:
@@ -847,6 +894,13 @@ class QwenDockerClient:
             # This ensures user-specified window selections take precedence over global settings
             data['override_global_settings'] = 'true'
             logger.info(f"Selected windows explicitly provided: {selected_windows}. Forcing override_global_settings=true")
+        else:
+            # Default to both windows for vertical mode
+            if data['window_mode'] == "vertical":
+                data['selected_windows'] = "top,bottom"
+                logger.warning("selected_windows was None for vertical mode, defaulted to 'top,bottom'")
+                # Also force override_global_settings to true
+                data['override_global_settings'] = 'true'
         
         # Add memory isolation if provided
         if memory_isolation is not None:
@@ -859,6 +913,13 @@ class QwenDockerClient:
         # Add GPU memory fraction if provided
         if gpu_memory_fraction is not None:
             data['gpu_memory_fraction'] = str(gpu_memory_fraction)
+        
+        # Add individual window processing parameters if provided
+        if original_window_mode is not None:
+            data['original_window_mode'] = original_window_mode
+            
+        if extract_window is not None:
+            data['extract_window'] = extract_window
         
         # Add custom prompts if provided
         if custom_prompts and isinstance(custom_prompts, dict):
@@ -996,10 +1057,25 @@ class QwenDockerClient:
             # Convert to JSON with proper types
             data['full_config'] = json.dumps(full_config)
             logger.info(f"Sending full_config with resolution_steps as integers")
+            
+        # CRITICAL: Final validation before API call to ensure window_mode is never None
+        if "window_mode" not in data or data["window_mode"] is None:
+            data["window_mode"] = "vertical"  
+            logger.warning("CRITICAL FIX: window_mode missing or None just before API call. Forced to 'vertical'")
+        
+        # CRITICAL: Final validation for selected_windows - needed for vertical mode
+        if "window_mode" in data and data["window_mode"] == "vertical" and "selected_windows" not in data:
+            data["selected_windows"] = "top,bottom"
+            logger.warning("CRITICAL FIX: selected_windows missing for vertical mode. Forced to 'top,bottom'")
+            
+        # CRITICAL: Force override_global_settings
+        data["override_global_settings"] = "true"
         
         try:
             # Make request to container
             logger.info(f"Sending image to container with params: {data}")
+            logger.info(f"Critical parameters: window_mode={data.get('window_mode', 'MISSING!')}, selected_windows={data.get('selected_windows', 'MISSING!')}")
+            
             start_time = time.time()
             response = requests.post(
                 f"{self.base_url}/process/image",

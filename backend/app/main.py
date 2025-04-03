@@ -188,7 +188,7 @@ def restart_container_with_gpu():
 @app.post("/api/extract-payslip")
 async def extract_payslip(
     file: UploadFile = File(...),
-    window_mode: Optional[str] = Form("quadrant"),  # Default window mode
+    window_mode: Optional[str] = Form("vertical"),  # Default to vertical mode instead of quadrant
     memory_isolation: Optional[str] = Form(None),  # Allow setting memory isolation
     force_cpu: Optional[bool] = Form(False)  # Allow forcing CPU but default to false
 ):

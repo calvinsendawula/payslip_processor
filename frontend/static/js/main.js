@@ -362,37 +362,159 @@ document.addEventListener('DOMContentLoaded', function() {
         const formData = new FormData();
         formData.append('file', file);
         
-        // Show loading state
-        payslipResults.style.display = 'block';
-        payslipLoading.style.display = 'block';
-        payslipContent.style.display = 'none';
+        // Always use vertical mode
+        formData.append('window_mode', 'vertical');
         
-        // Define the statusElement variable that was missing
+        // Get references to DOM elements and check if they exist
+        const payslipResults = document.getElementById('payslip-results');
+        const payslipLoading = document.getElementById('payslip-loading');
+        const payslipContent = document.getElementById('payslip-results-content');
+        
+        // Show loading state - using optional chaining to avoid errors
+        if (payslipResults) payslipResults.style.display = 'block';
+        if (payslipLoading) payslipLoading.style.display = 'block';
+        if (payslipContent) payslipContent.style.display = 'none';
+        
+        // Reset the employee search if it was previously displayed
+        const employeeSearch = document.querySelector('.search-container');
+        const employeeIdInput = document.getElementById('employee-id');
+        
+        if (employeeSearch) {
+            employeeSearch.style.display = 'none';
+        }
+        if (employeeIdInput) {
+            employeeIdInput.value = '';
+        }
+        
+        // Define the statusElement variable
         const statusElement = document.getElementById('payslip-status');
         
-        // Send to backend
-        fetch('/upload-payslip', {
-            method: 'POST',
-            body: formData
-        })
-        .then(response => {
-            if (!response.ok) {
-                return response.json().then(data => {
-                    throw new Error(data.error || 'Fehler bei der Verarbeitung der Gehaltsabrechnung');
+        // Get processing mode
+        const processingMode = document.querySelector('input[name="processing-mode"]:checked');
+        
+        // Default to single file processing if no mode is selected
+        if (!processingMode || processingMode.value === 'single') {
+            // Send to backend for extraction
+            fetch('/upload-payslip', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => {
+                if (!response.ok) {
+                    return response.json().then(data => {
+                        throw new Error(data.error || 'Fehler bei der Verarbeitung der Gehaltsabrechnung');
+                    });
+                }
+                return response.json();
+            })
+            .then(data => {
+                // Hide loading, show results
+                if (payslipLoading) payslipLoading.style.display = 'none';
+                if (payslipContent) payslipContent.style.display = 'block';
+                
+                // Make sure the single file results are displayed
+                if (document.getElementById('single-file-results')) {
+                    document.getElementById('single-file-results').style.display = 'block';
+                }
+                if (document.getElementById('batch-results')) {
+                    document.getElementById('batch-results').style.display = 'none';
+                }
+                
+                // Display the extracted data
+                displayExtractedData(data);
+            })
+            .catch(error => {
+                if (payslipLoading) payslipLoading.style.display = 'none';
+                if (payslipContent) payslipContent.style.display = 'block';
+                
+                // Show error message
+                if (statusElement) {
+                    statusElement.innerHTML = 
+                        `<span class="material-icons">error</span><span>${error.message || "Fehler bei der Verarbeitung der Gehaltsabrechnung"}</span>`;
+                    statusElement.className = 'summary-item error';
+                }
+                
+                // Clear other fields
+                const elements = [
+                    'employee-name', 'employee-name-match', 'employee-name-expected',
+                    'gross-amount', 'gross-amount-match', 'gross-amount-expected',
+                    'net-amount', 'net-amount-match', 'net-amount-expected'
+                ];
+                
+                elements.forEach(id => {
+                    const element = document.getElementById(id);
+                    if (element) {
+                        if (id.includes('match')) {
+                            element.innerHTML = '';
+                        } else {
+                            element.textContent = '';
+                        }
+                    }
                 });
+            });
+        } else if (processingMode.value === 'batch') {
+            // Get batch file input
+            const batchFileInput = document.getElementById('payslip-batch-file-input');
+            
+            if (!batchFileInput.files || batchFileInput.files.length === 0) {
+                alert('Bitte wählen Sie mindestens eine Datei aus.');
+                payslipLoading.style.display = 'none';
+                return;
             }
-            return response.json();
-        })
-        .then(data => {
-            // Update the UI with validation results
-            updateValidationResults(data);
-        })
-        .catch(error => {
-            // Show error message
-            statusElement.innerHTML = 
-                `<span class="material-icons">error</span><span>${error.message || "Fehler bei der Validierung"}</span>`;
-            statusElement.className = 'summary-item error';
-        });
+            
+            // Create form data
+            const batchFormData = new FormData();
+            
+            // Append all files
+            Array.from(batchFileInput.files).forEach((file, index) => {
+                batchFormData.append(`file_${index}`, file);
+            });
+            
+            // Always use vertical mode for batch processing too
+            batchFormData.append('window_mode', 'vertical');
+            
+            // Send the request
+            fetch('/upload-payslip-batch', {
+                method: 'POST',
+                body: batchFormData
+            })
+            .then(response => {
+                if (!response.ok) {
+                    return response.json().then(data => {
+                        throw new Error(data.error || 'Fehler bei der Stapelverarbeitung');
+                    });
+                }
+                return response.json();
+            })
+            .then(data => {
+                // Hide loading indicator
+                if (payslipLoading) payslipLoading.style.display = 'none';
+                if (payslipContent) payslipContent.style.display = 'block';
+                
+                // Make sure the batch results are displayed
+                if (document.getElementById('single-file-results')) {
+                    document.getElementById('single-file-results').style.display = 'none';
+                }
+                if (document.getElementById('batch-results')) {
+                    document.getElementById('batch-results').style.display = 'block';
+                }
+                
+                // Display batch results
+                displayBatchResults(data);
+            })
+            .catch(error => {
+                console.error('Batch upload error:', error);
+                if (payslipLoading) payslipLoading.style.display = 'none';
+                if (payslipContent) payslipContent.style.display = 'block';
+                
+                // Show error message
+                if (statusElement) {
+                    statusElement.innerHTML = 
+                        `<span class="material-icons">error</span><span>${error.message || "Fehler bei der Stapelverarbeitung"}</span>`;
+                    statusElement.className = 'summary-item error';
+                }
+            });
+        }
     });
     
     // Update UI with validation results (new)
@@ -542,201 +664,6 @@ document.addEventListener('DOMContentLoaded', function() {
             employeeSearch.style.display = 'block';
         }
     }
-    
-    // Handle payslip upload
-    payslipUploadBtn.addEventListener('click', () => {
-        if (!payslipFileInput.files.length) {
-            alert('Bitte wählen Sie zuerst eine Datei aus');
-            return;
-        }
-        
-        const file = payslipFileInput.files[0];
-        const formData = new FormData();
-        formData.append('file', file);
-        
-        // Get references to DOM elements and check if they exist
-        const payslipResults = document.getElementById('payslip-results');
-        const payslipLoading = document.getElementById('payslip-loading');
-        const payslipContent = document.getElementById('payslip-results-content');
-        
-        // Show loading state - using optional chaining to avoid errors
-        if (payslipResults) payslipResults.style.display = 'block';
-        if (payslipLoading) payslipLoading.style.display = 'block';
-        if (payslipContent) payslipContent.style.display = 'none';
-        
-        // Reset the employee search if it was previously displayed
-        const employeeSearch = document.querySelector('.search-container');
-        const employeeIdInput = document.getElementById('employee-id');
-        
-        if (employeeSearch) {
-            employeeSearch.style.display = 'none';
-        }
-        if (employeeIdInput) {
-            employeeIdInput.value = '';
-        }
-        
-        // Define the statusElement variable that was missing
-        const statusElement = document.getElementById('payslip-status');
-        
-        // Get processing mode
-        const processingMode = document.querySelector('input[name="processing-mode"]:checked');
-        
-        // Default to single file processing if no mode is selected
-        if (!processingMode || processingMode.value === 'single') {
-            // Check if specific page/quadrant info was provided
-            const employeeNamePageInput = document.getElementById('employee-name-page');
-            const employeeNameQuadrantSelect = document.getElementById('employee-name-quadrant');
-            const grossPageInput = document.getElementById('gross-page');
-            const grossQuadrantSelect = document.getElementById('gross-quadrant');
-            const netPageInput = document.getElementById('net-page');
-            const netQuadrantSelect = document.getElementById('net-quadrant');
-            
-            const hasPageInfo = employeeNamePageInput && employeeNamePageInput.value || 
-                              grossPageInput && grossPageInput.value || 
-                              netPageInput && netPageInput.value;
-            
-            let endpoint = '/upload-payslip';
-            
-            // If page/quadrant info is provided, use the specific endpoint
-            if (hasPageInfo) {
-                endpoint = '/upload-payslip-single';
-                
-                // Add page and quadrant information if provided
-                if (employeeNamePageInput.value) {
-                    formData.append('employee_name_page', employeeNamePageInput.value);
-                    formData.append('employee_name_quadrant', employeeNameQuadrantSelect.value || 'full');
-                }
-                
-                if (grossPageInput.value) {
-                    formData.append('gross_page', grossPageInput.value);
-                    formData.append('gross_quadrant', grossQuadrantSelect.value || 'full');
-                }
-                
-                if (netPageInput.value) {
-                    formData.append('net_page', netPageInput.value);
-                    formData.append('net_quadrant', netQuadrantSelect.value || 'full');
-                }
-            }
-        
-        // Send to backend for extraction only (not validation)
-            fetch(endpoint, {
-            method: 'POST',
-            body: formData
-        })
-        .then(response => {
-            if (!response.ok) {
-                return response.json().then(data => {
-                    throw new Error(data.error || 'Fehler bei der Verarbeitung der Gehaltsabrechnung');
-                });
-            }
-            return response.json();
-        })
-        .then(data => {
-            // Hide loading, show results
-                if (payslipLoading) payslipLoading.style.display = 'none';
-                if (payslipContent) payslipContent.style.display = 'block';
-                
-                // Make sure the single file results are displayed
-                if (document.getElementById('single-file-results')) {
-                    document.getElementById('single-file-results').style.display = 'block';
-                }
-                if (document.getElementById('batch-results')) {
-                    document.getElementById('batch-results').style.display = 'none';
-                }
-            
-            // Display the extracted data
-            displayExtractedData(data);
-        })
-        .catch(error => {
-                if (payslipLoading) payslipLoading.style.display = 'none';
-                if (payslipContent) payslipContent.style.display = 'block';
-            
-            // Show error message
-                if (statusElement) {
-            statusElement.innerHTML = 
-                `<span class="material-icons">error</span><span>${error.message || "Fehler bei der Verarbeitung der Gehaltsabrechnung"}</span>`;
-            statusElement.className = 'summary-item error';
-                }
-            
-            // Clear other fields
-                const elements = [
-                    'employee-name', 'employee-name-match', 'employee-name-expected',
-                    'gross-amount', 'gross-amount-match', 'gross-amount-expected',
-                    'net-amount', 'net-amount-match', 'net-amount-expected'
-                ];
-                
-                elements.forEach(id => {
-                    const element = document.getElementById(id);
-                    if (element) {
-                        if (id.includes('match')) {
-                            element.innerHTML = '';
-                        } else {
-                            element.textContent = '';
-                        }
-                    }
-                });
-        });
-        } else if (processingMode.value === 'batch') {
-            // Get batch file input
-            const batchFileInput = document.getElementById('payslip-batch-file-input');
-            
-            if (!batchFileInput.files || batchFileInput.files.length === 0) {
-                alert('Bitte wählen Sie mindestens eine Datei aus.');
-                payslipLoading.style.display = 'none';
-                return;
-            }
-            
-            // Create form data
-            const batchFormData = new FormData();
-            
-            // Append all files
-            Array.from(batchFileInput.files).forEach((file, index) => {
-                batchFormData.append(`file_${index}`, file);
-            });
-            
-            // Send the request
-            fetch('/upload-payslip-batch', {
-                method: 'POST',
-                body: batchFormData
-            })
-            .then(response => {
-                if (!response.ok) {
-                    return response.json().then(data => {
-                        throw new Error(data.error || 'Fehler bei der Stapelverarbeitung');
-                    });
-                }
-                return response.json();
-            })
-            .then(data => {
-                // Hide loading indicator
-                if (payslipLoading) payslipLoading.style.display = 'none';
-                if (payslipContent) payslipContent.style.display = 'block';
-                
-                // Make sure the batch results are displayed
-                if (document.getElementById('single-file-results')) {
-                    document.getElementById('single-file-results').style.display = 'none';
-                }
-                if (document.getElementById('batch-results')) {
-                    document.getElementById('batch-results').style.display = 'block';
-                }
-                
-                // Display batch results
-                displayBatchResults(data);
-            })
-            .catch(error => {
-                console.error('Batch upload error:', error);
-                if (payslipLoading) payslipLoading.style.display = 'none';
-                if (payslipContent) payslipContent.style.display = 'block';
-                
-                // Show error message
-                if (statusElement) {
-                    statusElement.innerHTML = 
-                        `<span class="material-icons">error</span><span>${error.message || "Fehler bei der Stapelverarbeitung"}</span>`;
-                    statusElement.className = 'summary-item error';
-                }
-            });
-        }
-    });
     
     // Function to display batch results
     function displayBatchResults(data) {
