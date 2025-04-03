@@ -84,3 +84,5 @@ pypi_package/qwen_payslip_processor/model_files/
 PayslipExtract/
 PayslipExtract/uploads/
 PayslipExtract/saved_configs/
+cleanup_endpoint_route.py
+cleanup_endpoint.py

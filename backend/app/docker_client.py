@@ -15,29 +15,35 @@ logger = logging.getLogger(__name__)
 class QwenDockerClient:
     """Client for interacting with the Qwen Payslip Processor Docker container"""
     
-    def __init__(self, host: str = "localhost", port: int = 27842, timeout: int = 600, container_name: str = "qwen-payslip-processor"):
+    def __init__(self, host: str = "localhost", port: int = 27842, timeout: int = 1800, container_name: str = "qwen-payslip-processor", cpu_timeout_multiplier: float = 2.0):
         """Initialize the Docker client
         
         Args:
             host: Hostname or IP where the Docker container is running
             port: Port number exposed by the Docker container
-            timeout: HTTP request timeout in seconds (default 600 seconds = 10 minutes)
+            timeout: HTTP request timeout in seconds (default 1800 seconds = 30 minutes)
             container_name: Name of the Docker container
+            cpu_timeout_multiplier: Factor to multiply timeout by when running on CPU
         """
         self.host = host
         self.port = port
-        self.timeout = timeout
+        self.base_timeout = timeout  # Store base timeout value
+        self.timeout = timeout       # Current timeout value
         self.container_name = container_name
         self.base_url = f"http://{host}:{port}"
+        self.cpu_timeout_multiplier = cpu_timeout_multiplier
         
         # Check GPU availability
         self.gpu_info = self._check_gpu_availability()
         
-        logger.info(f"Initialized Docker client for {self.base_url}")
+        logger.info(f"Initialized Docker client for {self.base_url} with base timeout {timeout}s")
         if self.gpu_info['available']:
             logger.info(f"GPU detected: {self.gpu_info['name']} - Container may use GPU acceleration")
         else:
             logger.info("No GPU detected or not accessible - Container will use CPU")
+            # For CPU, processing might take much longer
+            self.timeout = min(self.timeout * self.cpu_timeout_multiplier, 3600)  # Use multiplier from config
+            logger.info(f"Increased timeout to {self.timeout}s for CPU-only processing (multiplier: {self.cpu_timeout_multiplier}x)")
         
         # Verify container accessibility at startup
         if not self.is_container_running():
@@ -548,6 +554,40 @@ class QwenDockerClient:
         files = {'file': (file_name or 'document.pdf', pdf_bytes, 'application/pdf')}
         data = {}
         
+        # Calculate dynamic timeout based on pages and window count
+        # Start with base timeout
+        dynamic_timeout = self.base_timeout
+        
+        # Determine page count for timeout calculation
+        page_count = 1  # Default to 1 if unknown
+        if pages is not None:
+            if isinstance(pages, int):
+                page_count = 1
+                data['pages'] = str(pages)
+            elif isinstance(pages, list):
+                page_count = len(pages)
+                data['pages'] = ','.join(map(str, pages))
+        
+        # Calculate windows per page for timeout calculation
+        window_count = 1  # Default
+        if window_mode == "quadrant":
+            window_count = 4  # 4 windows per page
+        elif window_mode in ["vertical", "horizontal"]:
+            window_count = 2  # 2 windows per page
+            
+        # Multiply timeout by total windows to process
+        dynamic_timeout = dynamic_timeout * page_count * window_count
+        
+        # Cap at reasonable maximum (4 hours)
+        dynamic_timeout = min(dynamic_timeout, 14400)
+        
+        # If running on CPU, add additional time
+        if force_cpu or not self.gpu_info['available']:
+            dynamic_timeout = min(dynamic_timeout * self.cpu_timeout_multiplier, 14400)  # Use multiplier from config, cap at 4 hours
+            logger.info(f"Applied CPU timeout multiplier ({self.cpu_timeout_multiplier}x) for CPU-only processing")
+        
+        logger.info(f"Using dynamic timeout of {dynamic_timeout} seconds for {page_count} pages in {window_mode} mode")
+        
         # Add page information if provided
         if pages is not None:
             if isinstance(pages, int):
@@ -768,7 +808,7 @@ class QwenDockerClient:
                 f"{self.base_url}/process/pdf",
                 files=files,
                 data=data,
-                timeout=self.timeout
+                timeout=dynamic_timeout  # Use dynamic timeout
             )
             processing_time = time.time() - start_time
             logger.info(f"Container processed PDF in {processing_time:.2f} seconds")
@@ -874,6 +914,27 @@ class QwenDockerClient:
         # Prepare files and data
         files = {'file': ('document.jpg', image_bytes, 'image/jpeg')}
         data = {}
+        
+        # Calculate dynamic timeout based on window count
+        # Start with base timeout
+        dynamic_timeout = self.base_timeout
+        
+        # Calculate window count for timeout calculation
+        window_count = 1  # Default
+        if window_mode == "quadrant":
+            window_count = 4  # 4 windows per image
+        elif window_mode in ["vertical", "horizontal"]:
+            window_count = 2  # 2 windows per image
+            
+        # Multiply timeout by total windows to process
+        dynamic_timeout = dynamic_timeout * window_count
+        
+        # If running on CPU, add additional time
+        if force_cpu or not self.gpu_info['available']:
+            dynamic_timeout = min(dynamic_timeout * self.cpu_timeout_multiplier, 14400)  # Use multiplier from config, cap at 4 hours
+            logger.info(f"Applied CPU timeout multiplier ({self.cpu_timeout_multiplier}x) for CPU-only processing")
+        
+        logger.info(f"Using dynamic timeout of {dynamic_timeout} seconds for image in {window_mode} mode")
         
         # Add window mode if provided
         if window_mode is not None:
@@ -1081,7 +1142,7 @@ class QwenDockerClient:
                 f"{self.base_url}/process/image",
                 files=files,
                 data=data,
-                timeout=self.timeout
+                timeout=dynamic_timeout  # Use dynamic timeout
             )
             processing_time = time.time() - start_time
             logger.info(f"Container processed image in {processing_time:.2f} seconds")
@@ -1249,4 +1310,43 @@ class QwenDockerClient:
             bottom_right = image.crop((width // 2, height // 2, width, height))
             windows.extend([top_left, top_right, bottom_left, bottom_right])
         
-        return windows 
+        return windows
+    
+    def force_memory_cleanup(self):
+        """
+        Send a request to the container to force memory cleanup
+        This is useful to clear CUDA memory between processing operations
+        
+        Returns:
+            bool: True if cleanup was successful, False otherwise
+        """
+        if not self.is_container_running():
+            logger.warning("Container not running, cannot perform memory cleanup")
+            return False
+            
+        try:
+            logger.info("Requesting memory cleanup from Docker container")
+            
+            # Call container memory cleanup endpoint
+            response = requests.post(
+                f"{self.base_url}/cleanup/memory",
+                timeout=30
+            )
+            
+            # Check response
+            if response.status_code == 200:
+                result = response.json()
+                logger.info(f"Memory cleanup successful: {result.get('message', 'No details provided')}")
+                
+                # Log memory freed if available
+                if "memory_freed_mb" in result:
+                    logger.info(f"Memory freed: {result['memory_freed_mb']:.2f} MB")
+                    
+                return True
+            else:
+                logger.warning(f"Memory cleanup failed: {response.status_code} - {response.text}")
+                return False
+                
+        except Exception as e:
+            logger.error(f"Error during container memory cleanup: {e}")
+            return False 

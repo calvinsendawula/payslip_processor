@@ -4,7 +4,33 @@
 docker:
   host: "localhost"
   port: 27842
-  timeout: 1200  # Increased timeout for processing (20 minutes)
+  
+  # =====================================================================
+  # TIMEOUT SETTINGS
+  # =====================================================================
+  # The timeout system works as follows:
+  # 1. Base timeout is the minimum time allowed for processing (per window)
+  # 2. If timeout_per_page is true, timeout is multiplied by page count
+  # 3. Timeout is then multiplied by window count (2 for vertical mode)
+  # 4. If running on CPU, the timeout is multiplied by cpu_timeout_multiplier
+  # 5. Final timeout is capped at timeout_max to prevent excessive waits
+  #
+  # For batch processing with many pages, the timeout will scale accordingly.
+  # For example:
+  # - 10 pages × 2 windows × 30 minutes = 600 minutes = 10 hours
+  # - But this would be capped at timeout_max (4 hours by default)
+  #
+  # You may adjust these settings based on your hardware capabilities.
+  # =====================================================================
+  
+  timeout: 1800                # Base timeout in seconds (30 minutes)
+  timeout_per_page: true       # Whether to scale timeout by page count
+  timeout_scaling_factor: 1.0  # Multiply timeout by this factor (for fine-tuning)
+  timeout_max: 14400           # Maximum timeout in seconds (4 hours)
+  
+  # CPU timeout multiplier: when running on CPU instead of GPU,
+  # timeout will be multiplied by this value
+  cpu_timeout_multiplier: 2.0
 
 # Processing Settings
 processing:

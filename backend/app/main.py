@@ -244,17 +244,53 @@ async def extract_payslip(
         
         logger.info(f"Processing payslip with window mode '{window_mode}'")
         
+        start_time = time.time()
+        
         if file_ext in ['.pdf']:
             extracted_data = processor.process_pdf_file(
                 pdf_bytes=file_content,
                 file_name=file.filename
             )
-            return extracted_data
+        elif file_ext in ['.jpg', '.jpeg', '.png']:
+            extracted_data = processor.process_image_file(
+                image_bytes=file_content
+            )
         else:
-            raise HTTPException(status_code=400, detail=f"Unsupported file type: {file_ext}")
+            return JSONResponse(
+                status_code=400,
+                content={"error": f"Unsupported file format: {file_ext}. Please upload a PDF, JPG, or PNG file."}
+            )
+            
+        # Calculate processing time
+        processing_time = time.time() - start_time
+        
+        # Add processing metadata to response
+        result = {
+            "extracted_data": extracted_data,
+            "processing": {
+                "processing_time_seconds": processing_time,
+                "window_mode": window_mode,
+                "selected_windows": processor.config["processing"]["selected_windows"]
+            },
+            "file": {
+                "filename": file.filename,
+                "file_type": file_ext.lstrip('.')
+            }
+        }
+        
+        # Force explicit memory cleanup again to ensure GPU memory is released
+        try:
+            processor._explicit_memory_cleanup()
+        except Exception as e:
+            logger.warning(f"Additional memory cleanup failed: {str(e)}")
+        
+        return result
     except Exception as e:
         logger.error(f"Error processing payslip: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+        return JSONResponse(
+            status_code=500,
+            content={"error": f"Error processing file: {str(e)}"}
+        )
 
 @app.post("/api/extract-payslip-single")
 async def extract_payslip_single(
@@ -1066,4 +1102,33 @@ async def extract_payslip_advanced(
             
     except Exception as e:
         logger.error(f"Error in advanced payslip processing: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e)) 
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/cleanup-memory")
+async def cleanup_memory():
+    """
+    Force CUDA memory cleanup on the backend
+    This endpoint is available to force memory cleanup between operations
+    without needing to restart the container.
+    """
+    try:
+        # Create temporary processor instance just for cleanup
+        processor = QwenVLProcessor(document_type="payslip")
+        
+        # Call explicit cleanup method
+        processor._explicit_memory_cleanup()
+        
+        # Return success response
+        return {
+            "status": "success",
+            "message": "Memory cleanup completed successfully"
+        }
+    except Exception as e:
+        logger.error(f"Error during memory cleanup: {str(e)}")
+        return JSONResponse(
+            status_code=500,
+            content={
+                "status": "error",
+                "message": f"Error during memory cleanup: {str(e)}"
+            }
+        ) 

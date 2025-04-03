@@ -45,11 +45,35 @@ class QwenVLProcessor:
         
         # Initialize Docker client
         docker_config = self.config.get("docker", {})
+        
+        # Get all timeout settings from config
+        timeout = docker_config.get("timeout", 1800)  # Default 30 minutes
+        timeout_per_page = docker_config.get("timeout_per_page", True)  # Whether to scale timeout by page count
+        timeout_scaling_factor = docker_config.get("timeout_scaling_factor", 1.0)  # For fine-tuning timeout
+        timeout_max = docker_config.get("timeout_max", 14400)  # Max 4 hours by default
+        cpu_timeout_multiplier = docker_config.get("cpu_timeout_multiplier", 2.0)  # Multiply timeout by this for CPU
+        
+        # Log timeout settings
+        logger.info(f"Using timeout settings from config: base={timeout}s, per_page={timeout_per_page}, " 
+                     f"scaling_factor={timeout_scaling_factor}, max={timeout_max}s, "
+                     f"cpu_multiplier={cpu_timeout_multiplier}x")
+        
         self.docker_client = QwenDockerClient(
             host=docker_config.get("host", "localhost"),
             port=docker_config.get("port", 27842),
-            timeout=docker_config.get("timeout", 30)
+            timeout=timeout,
+            cpu_timeout_multiplier=cpu_timeout_multiplier
         )
+        
+        # Store timeout settings for use in processing methods
+        self.timeout_settings = {
+            "base": timeout,
+            "per_page": timeout_per_page,
+            "scaling_factor": timeout_scaling_factor,
+            "max": timeout_max,
+            "cpu_multiplier": cpu_timeout_multiplier
+        }
+        
         logger.info(f"Using Docker container for Qwen model processing with document type: {document_type}")
     
     def _load_config(self, config_path):
@@ -73,7 +97,11 @@ class QwenVLProcessor:
                 "docker": {
                     "host": "localhost",
                     "port": 27842,
-                    "timeout": 30
+                    "timeout": 1800,  # 30 minutes base timeout
+                    "timeout_per_page": True,  # Scale timeout by page count
+                    "timeout_scaling_factor": 1.0,  # Scaling factor for fine-tuning
+                    "timeout_max": 14400,  # Maximum timeout (4 hours)
+                    "cpu_timeout_multiplier": 2.0
                 },
                 "processing": {
                     "mode": "docker",
@@ -93,12 +121,16 @@ class QwenVLProcessor:
                 "docker": {
                     "host": "localhost",
                     "port": 27842,
-                    "timeout": 30
+                    "timeout": 1800,  # 30 minutes base timeout
+                    "timeout_per_page": True,  # Scale timeout by page count
+                    "timeout_scaling_factor": 1.0,  # Scaling factor for fine-tuning
+                    "timeout_max": 14400,  # Maximum timeout (4 hours)
+                    "cpu_timeout_multiplier": 2.0
                 },
                 "processing": {
                     "mode": "docker",
-                    "window_mode": "quadrant",
-                    "selected_windows": ["top_left", "bottom_right"],
+                    "window_mode": "vertical",  # Now using vertical by default
+                    "selected_windows": ["top", "bottom"],  # Both windows by default
                     "force_cpu": False
                 },
                 "pdf": {
@@ -533,10 +565,17 @@ class QwenVLProcessor:
             response = self.docker_client.process_pdf(**container_params)
             
             # Extract standardized fields
-            return self._extract_from_response(response)
+            result = self._extract_from_response(response)
+            
+            # Force PyTorch CUDA memory cleanup
+            self._explicit_memory_cleanup()
+            
+            return result
             
         except Exception as e:
             logger.error(f"Error processing PDF: {e}")
+            # Force cleanup even on error
+            self._explicit_memory_cleanup()
             raise
     
     # Alias for backward compatibility
@@ -683,10 +722,15 @@ class QwenVLProcessor:
                 "total_pages": response.get("total_pages", 0)
             }
             
+            # Force PyTorch CUDA memory cleanup
+            self._explicit_memory_cleanup()
+            
             return result
             
         except Exception as e:
             logger.error(f"Error processing PDF with pages: {e}")
+            # Force cleanup even on error
+            self._explicit_memory_cleanup()
             raise
     
     def process_image_file(self, image_bytes):
@@ -793,10 +837,17 @@ class QwenVLProcessor:
             response = self.docker_client.process_image(**container_params)
             
             # Extract standardized fields
-            return self._extract_from_response(response)
+            result = self._extract_from_response(response)
+            
+            # Force PyTorch CUDA memory cleanup
+            self._explicit_memory_cleanup()
+            
+            return result
             
         except Exception as e:
             logger.error(f"Error processing image: {e}")
+            # Force cleanup even on error
+            self._explicit_memory_cleanup()
             raise
 
     def _validate_resolution_steps(self, resolution_steps):
@@ -838,6 +889,70 @@ class QwenVLProcessor:
         except (ValueError, TypeError) as e:
             logger.warning(f"Invalid resolution_steps format: {resolution_steps}. Using default [600, 400]. Error: {e}")
             return [600, 400]
+
+    def _explicit_memory_cleanup(self):
+        """
+        Explicitly force GPU memory cleanup by calling Python's garbage collector
+        and trying to clear PyTorch's CUDA cache if available.
+        This should help prevent memory leaks between processing runs.
+        """
+        import gc
+        
+        # Log memory cleanup attempt
+        logger.info("Performing explicit memory cleanup after processing")
+        
+        # 1. First try to clean up memory in the Docker container
+        try:
+            # Use the Docker client to force container memory cleanup
+            if hasattr(self, 'docker_client') and self.docker_client:
+                if self.docker_client.force_memory_cleanup():
+                    logger.info("Successfully cleaned memory in Docker container")
+                else:
+                    logger.warning("Failed to clean memory in Docker container")
+        except Exception as e:
+            logger.warning(f"Error cleaning memory in Docker container: {str(e)}")
+        
+        # 2. Force Python garbage collection
+        gc.collect()
+        
+        # 3. Try to clear CUDA cache if PyTorch is available
+        try:
+            import torch
+            if torch.cuda.is_available():
+                # Get initial memory stats
+                initial_allocated = torch.cuda.memory_allocated()
+                initial_reserved = torch.cuda.memory_reserved()
+                
+                # Empty CUDA cache
+                torch.cuda.empty_cache()
+                
+                # Get post-cleanup memory stats
+                final_allocated = torch.cuda.memory_allocated()
+                final_reserved = torch.cuda.memory_reserved()
+                
+                # Log memory freed
+                freed_allocated = initial_allocated - final_allocated
+                freed_reserved = initial_reserved - final_reserved
+                
+                logger.info(f"CUDA memory cleanup: freed {freed_allocated / (1024**2):.2f} MB allocated, "
+                             f"{freed_reserved / (1024**2):.2f} MB reserved")
+        except (ImportError, AttributeError) as e:
+            logger.warning(f"Could not clean CUDA memory: {str(e)}")
+        except Exception as e:
+            logger.warning(f"Unexpected error during CUDA memory cleanup: {str(e)}")
+        
+        # 4. Additional cleanup steps for CUDA context
+        try:
+            # Try to force Python to release more memory
+            gc.collect()
+            
+            # Run a small garbage collection cycle again to make sure
+            # everything is properly cleaned up
+            gc.collect()
+            
+            logger.info("Memory cleanup completed")
+        except Exception as e:
+            logger.warning(f"Error during final garbage collection: {str(e)}")
 
 def get_qwen_processor(config_path=None, document_type="payslip"):
     """Factory function to get a QwenVLProcessor instance

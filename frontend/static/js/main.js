@@ -610,8 +610,31 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     }
     
+    // Ensure data has the correct format before displaying
+    function ensureDataFormat(data) {
+        if (!data) return { employee: { name: "" }, payment: { gross: "", net: "" } };
+        
+        // If data already has the correct structure, return it as is
+        if (data.employee && data.payment) return data;
+        
+        // Create properly formatted data object
+        return {
+            employee: {
+                name: data.extracted_data?.employee?.name || ""
+            },
+            payment: {
+                gross: data.extracted_data?.payment?.gross || "",
+                net: data.extracted_data?.payment?.net || ""
+            },
+            processing_time: data.processing?.processing_time_seconds + " seconds" || ""
+        };
+    }
+    
     // Display initially extracted data (new)
     function displayExtractedData(data) {
+        // Format data to ensure it has the expected structure
+        data = ensureDataFormat(data);
+        
         // Store the extracted data for later validation
         currentExtractedData = data;
         

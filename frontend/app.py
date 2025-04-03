@@ -128,6 +128,25 @@ def proxy_restart_container_with_gpu():
         app.logger.error(f"Error restarting container with GPU: {str(e)}")
         return jsonify({"success": False, "message": str(e)}), 500
 
+def cleanup_gpu_memory():
+    """
+    Call the backend endpoint to clean up GPU memory
+    This helps prevent memory issues when processing multiple files
+    without restarting the container
+    """
+    try:
+        app.logger.info("Requesting GPU memory cleanup")
+        response = requests.get(f"{app.config['BACKEND_URL']}/api/cleanup-memory", timeout=30)
+        if response.status_code == 200:
+            app.logger.info("GPU memory cleanup successful")
+            return True
+        else:
+            app.logger.warning(f"GPU memory cleanup failed with status {response.status_code}")
+            return False
+    except Exception as e:
+        app.logger.error(f"Error requesting GPU memory cleanup: {str(e)}")
+        return False
+
 @app.route('/upload-payslip', methods=['POST'])
 def upload_payslip():
     if 'file' not in request.files:
@@ -159,6 +178,9 @@ def upload_payslip():
             
             # Clean up the temporary file
             os.remove(filepath)
+            
+            # Always request GPU memory cleanup after processing
+            cleanup_gpu_memory()
             
             if response.status_code == 200:
                 result = response.json()
@@ -200,55 +222,65 @@ def upload_payslip_batch():
     batch_results = []
     
     try:
+        # Process each file individually
         for filename, filepath in files:
+            app.logger.info(f"Processing file: {filename}")
             try:
                 with open(filepath, 'rb') as f:
-                    file_to_send = {'file': (filename, f, 'application/pdf')}
+                    files_dict = {'file': (filename, f, 'application/pdf')}
                     
-                    # Always use vertical window mode for batch processing
+                    # Always use vertical window mode
                     data = {'window_mode': 'vertical'}
                     
                     response = requests.post(
                         f"{app.config['BACKEND_URL']}/api/extract-payslip", 
-                        files=file_to_send,
+                        files=files_dict,
                         data=data
                     )
                 
+                # Check for successful processing
                 if response.status_code == 200:
                     result = response.json()
-                    result['filename'] = filename
-                    batch_results.append(result)
+                    batch_results.append({
+                        'filename': filename,
+                        'success': True,
+                        'data': result
+                    })
                 else:
-                    error_message = 'Processing failed'
+                    error_message = 'Backend processing failed'
                     try:
                         error_data = response.json()
                         if 'detail' in error_data:
                             error_message = error_data['detail']
                     except:
                         pass
-                    
                     batch_results.append({
                         'filename': filename,
-                        'error': error_message,
-                        'status': 'error'
+                        'success': False,
+                        'error': error_message
                     })
+                    
+                # Always request GPU memory cleanup after each file
+                cleanup_gpu_memory()
+                    
             except Exception as e:
                 app.logger.error(f"Error processing file {filename}: {str(e)}")
                 batch_results.append({
                     'filename': filename,
-                    'error': str(e),
-                    'status': 'error'
+                    'success': False,
+                    'error': str(e)
                 })
     finally:
-        # Clean up temporary files
+        # Clean up all temporary files
         for _, filepath in files:
             if os.path.exists(filepath):
                 os.remove(filepath)
     
+    # Return batch results
     return jsonify({
         'batch_results': batch_results,
-        'total_processed': len(batch_results),
-        'successful': sum(1 for result in batch_results if 'error' not in result)
+        'total_files': len(files),
+        'successful_files': sum(1 for result in batch_results if result.get('success', False))
     })
 
 @app.route('/validate-payslip', methods=['POST'])
@@ -291,21 +323,38 @@ def upload_property():
         # Send to backend
         try:
             with open(filepath, 'rb') as f:
-                files = {'file': (filename, f)}
+                files = {'file': (filename, f, 'application/pdf')}
+                
+                # Always use whole window mode for property documents
+                data = {'window_mode': 'whole'}
+                
                 response = requests.post(
-                    f"{app.config['BACKEND_URL']}/api/process-property", 
-                    files=files
+                    f"{app.config['BACKEND_URL']}/api/extract-property", 
+                    files=files,
+                    data=data
                 )
             
             # Clean up the temporary file
             os.remove(filepath)
             
+            # Always request GPU memory cleanup after processing
+            cleanup_gpu_memory()
+            
             if response.status_code == 200:
-                return jsonify(response.json())
+                result = response.json()
+                return jsonify(result)
             else:
-                return jsonify({'error': response.json().get('detail', 'Backend processing failed')}), response.status_code
+                error_message = 'Backend processing failed'
+                try:
+                    error_data = response.json()
+                    if 'detail' in error_data:
+                        error_message = error_data['detail']
+                except:
+                    pass
+                return jsonify({'error': error_message}), response.status_code
                 
         except Exception as e:
+            app.logger.error(f"Error in property file processing: {str(e)}")
             return jsonify({'error': str(e)}), 500
         finally:
             # Make sure file is removed even if there's an error
