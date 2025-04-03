@@ -27,7 +27,7 @@ DISCLAIMER: the employee search function is not working right now, but the extra
 ### Windows WSL2 Configuration:
 NOTE: Check how many processor cores your device has. Here I have 20 so I will set it to use 12 processors.
 
-[Click to view this screenshot of My processors](https://drive.google.com/uc?export=view&id=1sqat3n46ddeIUyMi4o33mXnUOfISNjpU)
+![image](https://github.com/user-attachments/assets/cee7933c-9eeb-46f9-855a-629c5d2cce81)
 
 1. Create/edit file at `C:\Users\YourUsername\.wslconfig`:
    ```
