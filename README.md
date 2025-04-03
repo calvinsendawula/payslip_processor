@@ -1,5 +1,5 @@
 # Payslip Processor Setup Guide
-DISCLAIMER: the employee search function is not working right now, but the extraction is accurate. Also, make sure to adjust the docker commands based on your available memory, don't allocate more than what you have and always leave 8GB spared for your device to use. e.g if you have 50GB RAM, set the docker command and docker configs to use at most 42GB.
+NOTE: Make sure to adjust the docker commands based on your available memory, don't allocate more than what you have and always leave 8GB spared for your device to use. e.g if you have 50GB RAM, set the docker command and docker configs to use at most 42GB.
 
 ## Initial Setup
 1. Clone the repository:
