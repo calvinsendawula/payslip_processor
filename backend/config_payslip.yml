@@ -119,24 +119,27 @@ prompts:
     bottom: |
       Du siehst die untere Hälfte einer deutschen Gehaltsabrechnung.
 
+      WICHTIG ZUM BRUTTOGEHALT:
+      Es gibt zwei verschiedene Bruttogehalt-Werte im Dokument. Achte genau auf die Position!
+      
       SUCHE NACH DIESEN INFORMATIONEN:
       1. Namen des Angestellten falls in diesem Bereich sichtbar
+         - Der Name kann überall im Dokument vorkommen
       2. Bruttogehalt ("Gesamt-Brutto")
-         - POSITION: Suche AUSSCHLIESSLICH auf der RECHTEN Seite des Dokuments
-         - WICHTIG: Es gibt möglicherweise zwei "Gesamt-Brutto" Werte!
-         - Der korrekte Wert steht IMMER unter dem Label "Gesamt-Brutto" auf der RECHTEN Seite
-         - IGNORIERE KOMPLETT alle Werte unter "Verdienstbescheinigung" auf der linken Seite
-         - Der Wert sollte im Bereich von 1.000 € bis 10.000 € liegen
+         - POSITION: Auf der rechten Seite des Dokuments unter dem Label "Gesamt-Brutto"
+         - WICHTIG: Es gibt zwei unterschiedliche Bruttobeträge im Dokument:
+           a) Einen auf der linken Seite unter "Verdienstbescheinigung" - DIESEN NICHT VERWENDEN
+           b) Einen auf der rechten Seite unter "Gesamt-Brutto" - NUR DIESEN VERWENDEN
       3. Nettogehalt ("Auszahlungsbetrag")
-         - POSITION: Meist ganz unten auf der RECHTEN Seite des Dokuments
-         - ERKENNBAR: Der Wert steht direkt neben dem Label "Auszahlungsbetrag", rechts ausgerichtet
+         - POSITION: Ganz unten auf der rechten Seite des Dokuments
+         - ERKENNBAR: Der Wert steht direkt neben dem Label "Auszahlungsbetrag"
          - HINWEIS: Dies ist typischerweise die letzte Zahl im Dokument
-         - PRÜFUNG: Der Wert sollte kleiner als das Bruttogehalt sein
 
       WICHTIG:
-      - Gib NUR die Werte zurück, die zu diesen spezifischen Labels gehören
-      - Die wichtigsten Zahlenwerte (Brutto und Netto) sind IMMER auf der rechten Seite des Dokuments
-      - Ignoriere alle ähnlichen Werte auf der linken Seite
+      - Suche den Namen des Angestellten überall im Dokument
+      - Verwende NUR den Bruttogehalt von der rechten Seite
+      - Ignoriere den Bruttogehalt auf der linken Seite unter "Verdienstbescheinigung"
+      - Das Nettogehalt findest du ganz unten rechts
       - Achte auf das korrekte Format: #.###,## (mit Punkt als Tausendertrennzeichen)
       - Gib "unknown" für den Namen zurück, wenn du ihn nicht finden kannst
       - Gib "0" für Beträge zurück, wenn du sie nicht sicher identifizieren kannst
@@ -145,7 +148,7 @@ prompts:
       {
       "found_in_bottom": {
           "employee_name": "Name des Angestellten oder 'unknown'",
-          "gross_amount": "Bruttogehalt oder '0'",
+          "gross_amount": "Bruttogehalt von der rechten Seite oder '0'",
           "net_amount": "Nettogehalt oder '0'"
       }
       }
