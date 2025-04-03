@@ -135,6 +135,7 @@ docker run -d -p 27842:27842 \
 1. Start the backend:
    ```
    cd backend
+   python -m app.seed_db
    uvicorn app.main:app --reload
    ```
 
