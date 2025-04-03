@@ -15,29 +15,35 @@ logger = logging.getLogger(__name__)
 class QwenDockerClient:
     """Client for interacting with the Qwen Payslip Processor Docker container"""
     
-    def __init__(self, host: str = "localhost", port: int = 27842, timeout: int = 30, container_name: str = "qwen-payslip-processor"):
+    def __init__(self, host: str = "localhost", port: int = 27842, timeout: int = 1800, container_name: str = "qwen-payslip-processor", cpu_timeout_multiplier: float = 2.0):
         """Initialize the Docker client
         
         Args:
             host: Hostname or IP where the Docker container is running
             port: Port number exposed by the Docker container
-            timeout: HTTP request timeout in seconds
+            timeout: HTTP request timeout in seconds (default 1800 seconds = 30 minutes)
             container_name: Name of the Docker container
+            cpu_timeout_multiplier: Factor to multiply timeout by when running on CPU
         """
         self.host = host
         self.port = port
-        self.timeout = timeout
+        self.base_timeout = timeout  # Store base timeout value
+        self.timeout = timeout       # Current timeout value
         self.container_name = container_name
         self.base_url = f"http://{host}:{port}"
+        self.cpu_timeout_multiplier = cpu_timeout_multiplier
         
         # Check GPU availability
         self.gpu_info = self._check_gpu_availability()
         
-        logger.info(f"Initialized Docker client for {self.base_url}")
+        logger.info(f"Initialized Docker client for {self.base_url} with base timeout {timeout}s")
         if self.gpu_info['available']:
             logger.info(f"GPU detected: {self.gpu_info['name']} - Container may use GPU acceleration")
         else:
             logger.info("No GPU detected or not accessible - Container will use CPU")
+            # For CPU, processing might take much longer
+            self.timeout = min(self.timeout * self.cpu_timeout_multiplier, 3600)  # Use multiplier from config
+            logger.info(f"Increased timeout to {self.timeout}s for CPU-only processing (multiplier: {self.cpu_timeout_multiplier}x)")
         
         # Verify container accessibility at startup
         if not self.is_container_running():
@@ -468,6 +474,9 @@ class QwenDockerClient:
                     file_name: Optional[str] = None,
                     force_cpu: bool = False,
                     gpu_memory_fraction: Optional[float] = None,
+                    # Parameters for individual window processing
+                    original_window_mode: Optional[str] = None,
+                    extract_window: Optional[str] = None,
                     # Add all new parameters from the container API
                     pdf_dpi: Optional[int] = None,
                     image_resolution_steps: Optional[List[int]] = None,
@@ -504,6 +513,8 @@ class QwenDockerClient:
             file_name: Original filename (optional)
             force_cpu: Force CPU processing even if GPU is available
             gpu_memory_fraction: Fraction of GPU memory to use (0.0-1.0)
+            original_window_mode: Original window mode when processing individual windows
+            extract_window: Specific window to extract when processing individual windows
             pdf_dpi: DPI for PDF rendering
             image_resolution_steps: List of image resolutions to try
             image_enhance_contrast: Enable contrast enhancement
@@ -543,6 +554,40 @@ class QwenDockerClient:
         files = {'file': (file_name or 'document.pdf', pdf_bytes, 'application/pdf')}
         data = {}
         
+        # Calculate dynamic timeout based on pages and window count
+        # Start with base timeout
+        dynamic_timeout = self.base_timeout
+        
+        # Determine page count for timeout calculation
+        page_count = 1  # Default to 1 if unknown
+        if pages is not None:
+            if isinstance(pages, int):
+                page_count = 1
+                data['pages'] = str(pages)
+            elif isinstance(pages, list):
+                page_count = len(pages)
+                data['pages'] = ','.join(map(str, pages))
+        
+        # Calculate windows per page for timeout calculation
+        window_count = 1  # Default
+        if window_mode == "quadrant":
+            window_count = 4  # 4 windows per page
+        elif window_mode in ["vertical", "horizontal"]:
+            window_count = 2  # 2 windows per page
+            
+        # Multiply timeout by total windows to process
+        dynamic_timeout = dynamic_timeout * page_count * window_count
+        
+        # Cap at reasonable maximum (4 hours)
+        dynamic_timeout = min(dynamic_timeout, 14400)
+        
+        # If running on CPU, add additional time
+        if force_cpu or not self.gpu_info['available']:
+            dynamic_timeout = min(dynamic_timeout * self.cpu_timeout_multiplier, 14400)  # Use multiplier from config, cap at 4 hours
+            logger.info(f"Applied CPU timeout multiplier ({self.cpu_timeout_multiplier}x) for CPU-only processing")
+        
+        logger.info(f"Using dynamic timeout of {dynamic_timeout} seconds for {page_count} pages in {window_mode} mode")
+        
         # Add page information if provided
         if pages is not None:
             if isinstance(pages, int):
@@ -553,6 +598,10 @@ class QwenDockerClient:
         # Add window mode if provided
         if window_mode is not None:
             data['window_mode'] = window_mode
+        else:
+            # Default to vertical mode if None is provided
+            data['window_mode'] = "vertical"
+            logger.warning("window_mode was None, defaulted to 'vertical'")
             
         # Add selected windows if provided
         if selected_windows is not None:
@@ -560,6 +609,18 @@ class QwenDockerClient:
                 data['selected_windows'] = ','.join(selected_windows)
             else:
                 data['selected_windows'] = selected_windows
+            
+            # Force override_global_settings to true when selected_windows is explicitly provided
+            # This ensures user-specified window selections take precedence over global settings
+            data['override_global_settings'] = 'true'
+            logger.info(f"Selected windows explicitly provided: {selected_windows}. Forcing override_global_settings=true")
+        else:
+            # Default to both windows for vertical mode
+            if data['window_mode'] == "vertical":
+                data['selected_windows'] = "top,bottom"
+                logger.warning("selected_windows was None for vertical mode, defaulted to 'top,bottom'")
+                # Also force override_global_settings to true
+                data['override_global_settings'] = 'true'
         
         # Add memory isolation if provided
         if memory_isolation is not None:
@@ -581,6 +642,13 @@ class QwenDockerClient:
         # Add page configs if provided
         if page_configs and isinstance(page_configs, dict):
             data['page_configs'] = json.dumps(page_configs)
+            
+        # Add individual window processing parameters if provided
+        if original_window_mode is not None:
+            data['original_window_mode'] = original_window_mode
+            
+        if extract_window is not None:
+            data['extract_window'] = extract_window
             
         # Add PDF parameters
         if pdf_dpi is not None:
@@ -689,16 +757,15 @@ class QwenDockerClient:
         if global_prompt is not None:
             data['global_prompt'] = global_prompt
             
+        # Add global_selected_windows if provided
         if global_selected_windows is not None:
-            if isinstance(global_selected_windows, list):
-                data['global_selected_windows'] = ','.join(global_selected_windows)
-            else:
-                data['global_selected_windows'] = global_selected_windows
-                
-        # Add override_global_settings if provided
-        if override_global_settings is not None:
+            data['global_selected_windows'] = global_selected_windows
+        
+        # Add override_global_settings if provided (but don't overwrite if already set above)
+        if override_global_settings is not None and 'override_global_settings' not in data:
+            # ensure it's a string
             data['override_global_settings'] = str(override_global_settings).lower()
-            
+        
         # Add full config if provided
         if full_config is not None:
             # FIXED: Parse resolution_steps to ensure they are integers before sending
@@ -718,15 +785,30 @@ class QwenDockerClient:
             data['full_config'] = json.dumps(full_config)
             logger.info(f"Sending full_config with resolution_steps as integers")
         
+        # CRITICAL: Final validation before API call to ensure window_mode is never None
+        if "window_mode" not in data or data["window_mode"] is None:
+            data["window_mode"] = "vertical"  
+            logger.warning("CRITICAL FIX: window_mode missing or None just before API call. Forced to 'vertical'")
+        
+        # CRITICAL: Final validation for selected_windows - needed for vertical mode
+        if "window_mode" in data and data["window_mode"] == "vertical" and "selected_windows" not in data:
+            data["selected_windows"] = "top,bottom"
+            logger.warning("CRITICAL FIX: selected_windows missing for vertical mode. Forced to 'top,bottom'")
+            
+        # CRITICAL: Force override_global_settings
+        data["override_global_settings"] = "true"
+        
         try:
             # Make request to container
             logger.info(f"Sending PDF to container with params: {data}")
+            logger.info(f"Critical parameters: window_mode={data.get('window_mode', 'MISSING!')}, selected_windows={data.get('selected_windows', 'MISSING!')}")
+            
             start_time = time.time()
             response = requests.post(
                 f"{self.base_url}/process/pdf",
                 files=files,
                 data=data,
-                timeout=self.timeout
+                timeout=dynamic_timeout  # Use dynamic timeout
             )
             processing_time = time.time() - start_time
             logger.info(f"Container processed PDF in {processing_time:.2f} seconds")
@@ -759,6 +841,9 @@ class QwenDockerClient:
                     custom_prompts: Optional[Dict[str, str]] = None,
                     force_cpu: bool = False,
                     gpu_memory_fraction: Optional[float] = None,
+                    # Parameters for individual window processing
+                    original_window_mode: Optional[str] = None,
+                    extract_window: Optional[str] = None,
                     # Add all new parameters from the container API
                     memory_isolation: Optional[str] = None,
                     image_resolution_steps: Optional[List[int]] = None,
@@ -830,9 +915,34 @@ class QwenDockerClient:
         files = {'file': ('document.jpg', image_bytes, 'image/jpeg')}
         data = {}
         
+        # Calculate dynamic timeout based on window count
+        # Start with base timeout
+        dynamic_timeout = self.base_timeout
+        
+        # Calculate window count for timeout calculation
+        window_count = 1  # Default
+        if window_mode == "quadrant":
+            window_count = 4  # 4 windows per image
+        elif window_mode in ["vertical", "horizontal"]:
+            window_count = 2  # 2 windows per image
+            
+        # Multiply timeout by total windows to process
+        dynamic_timeout = dynamic_timeout * window_count
+        
+        # If running on CPU, add additional time
+        if force_cpu or not self.gpu_info['available']:
+            dynamic_timeout = min(dynamic_timeout * self.cpu_timeout_multiplier, 14400)  # Use multiplier from config, cap at 4 hours
+            logger.info(f"Applied CPU timeout multiplier ({self.cpu_timeout_multiplier}x) for CPU-only processing")
+        
+        logger.info(f"Using dynamic timeout of {dynamic_timeout} seconds for image in {window_mode} mode")
+        
         # Add window mode if provided
         if window_mode is not None:
             data['window_mode'] = window_mode
+        else:
+            # Default to vertical mode if None is provided
+            data['window_mode'] = "vertical"
+            logger.warning("window_mode was None, defaulted to 'vertical'")
             
         # Add selected windows if provided
         if selected_windows is not None:
@@ -840,7 +950,19 @@ class QwenDockerClient:
                 data['selected_windows'] = ','.join(selected_windows)
             else:
                 data['selected_windows'] = selected_windows
-         
+            
+            # Force override_global_settings to true when selected_windows is explicitly provided
+            # This ensures user-specified window selections take precedence over global settings
+            data['override_global_settings'] = 'true'
+            logger.info(f"Selected windows explicitly provided: {selected_windows}. Forcing override_global_settings=true")
+        else:
+            # Default to both windows for vertical mode
+            if data['window_mode'] == "vertical":
+                data['selected_windows'] = "top,bottom"
+                logger.warning("selected_windows was None for vertical mode, defaulted to 'top,bottom'")
+                # Also force override_global_settings to true
+                data['override_global_settings'] = 'true'
+        
         # Add memory isolation if provided
         if memory_isolation is not None:
             data['memory_isolation'] = memory_isolation
@@ -852,6 +974,13 @@ class QwenDockerClient:
         # Add GPU memory fraction if provided
         if gpu_memory_fraction is not None:
             data['gpu_memory_fraction'] = str(gpu_memory_fraction)
+        
+        # Add individual window processing parameters if provided
+        if original_window_mode is not None:
+            data['original_window_mode'] = original_window_mode
+            
+        if extract_window is not None:
+            data['extract_window'] = extract_window
         
         # Add custom prompts if provided
         if custom_prompts and isinstance(custom_prompts, dict):
@@ -989,16 +1118,31 @@ class QwenDockerClient:
             # Convert to JSON with proper types
             data['full_config'] = json.dumps(full_config)
             logger.info(f"Sending full_config with resolution_steps as integers")
+            
+        # CRITICAL: Final validation before API call to ensure window_mode is never None
+        if "window_mode" not in data or data["window_mode"] is None:
+            data["window_mode"] = "vertical"  
+            logger.warning("CRITICAL FIX: window_mode missing or None just before API call. Forced to 'vertical'")
+        
+        # CRITICAL: Final validation for selected_windows - needed for vertical mode
+        if "window_mode" in data and data["window_mode"] == "vertical" and "selected_windows" not in data:
+            data["selected_windows"] = "top,bottom"
+            logger.warning("CRITICAL FIX: selected_windows missing for vertical mode. Forced to 'top,bottom'")
+            
+        # CRITICAL: Force override_global_settings
+        data["override_global_settings"] = "true"
         
         try:
             # Make request to container
             logger.info(f"Sending image to container with params: {data}")
+            logger.info(f"Critical parameters: window_mode={data.get('window_mode', 'MISSING!')}, selected_windows={data.get('selected_windows', 'MISSING!')}")
+            
             start_time = time.time()
             response = requests.post(
                 f"{self.base_url}/process/image",
                 files=files,
                 data=data,
-                timeout=self.timeout
+                timeout=dynamic_timeout  # Use dynamic timeout
             )
             processing_time = time.time() - start_time
             logger.info(f"Container processed image in {processing_time:.2f} seconds")
@@ -1166,4 +1310,43 @@ class QwenDockerClient:
             bottom_right = image.crop((width // 2, height // 2, width, height))
             windows.extend([top_left, top_right, bottom_left, bottom_right])
         
-        return windows 
+        return windows
+    
+    def force_memory_cleanup(self):
+        """
+        Send a request to the container to force memory cleanup
+        This is useful to clear CUDA memory between processing operations
+        
+        Returns:
+            bool: True if cleanup was successful, False otherwise
+        """
+        if not self.is_container_running():
+            logger.warning("Container not running, cannot perform memory cleanup")
+            return False
+            
+        try:
+            logger.info("Requesting memory cleanup from Docker container")
+            
+            # Call container memory cleanup endpoint
+            response = requests.post(
+                f"{self.base_url}/cleanup/memory",
+                timeout=30
+            )
+            
+            # Check response
+            if response.status_code == 200:
+                result = response.json()
+                logger.info(f"Memory cleanup successful: {result.get('message', 'No details provided')}")
+                
+                # Log memory freed if available
+                if "memory_freed_mb" in result:
+                    logger.info(f"Memory freed: {result['memory_freed_mb']:.2f} MB")
+                    
+                return True
+            else:
+                logger.warning(f"Memory cleanup failed: {response.status_code} - {response.text}")
+                return False
+                
+        except Exception as e:
+            logger.error(f"Error during container memory cleanup: {e}")
+            return False 

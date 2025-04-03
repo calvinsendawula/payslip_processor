@@ -4,18 +4,44 @@
 docker:
   host: "localhost"
   port: 27842
-  timeout: 60  # Increased timeout for processing
+  
+  # =====================================================================
+  # TIMEOUT SETTINGS
+  # =====================================================================
+  # The timeout system works as follows:
+  # 1. Base timeout is the minimum time allowed for processing (per window)
+  # 2. If timeout_per_page is true, timeout is multiplied by page count
+  # 3. Timeout is then multiplied by window count (2 for vertical mode)
+  # 4. If running on CPU, the timeout is multiplied by cpu_timeout_multiplier
+  # 5. Final timeout is capped at timeout_max to prevent excessive waits
+  #
+  # For batch processing with many pages, the timeout will scale accordingly.
+  # For example:
+  # - 10 pages × 2 windows × 30 minutes = 600 minutes = 10 hours
+  # - But this would be capped at timeout_max (4 hours by default)
+  #
+  # You may adjust these settings based on your hardware capabilities.
+  # =====================================================================
+  
+  timeout: 1800                # Base timeout in seconds (30 minutes)
+  timeout_per_page: true       # Whether to scale timeout by page count
+  timeout_scaling_factor: 1.0  # Multiply timeout by this factor (for fine-tuning)
+  timeout_max: 14400           # Maximum timeout in seconds (4 hours)
+  
+  # CPU timeout multiplier: when running on CPU instead of GPU,
+  # timeout will be multiplied by this value
+  cpu_timeout_multiplier: 2.0
 
 # Processing Settings
 processing:
   mode: "docker"  # Using Docker container for processing
-  window_mode: "vertical"  # Using vertical split (top/bottom) for batch processing
+  window_mode: "vertical"  # Using vertical split (top/bottom) for all processing
   selected_windows:
     - "top"
     - "bottom"
   force_cpu: false  # Keep GPU processing enabled
-  memory_isolation: "none"  # No memory isolation
-  gpu_memory_fraction: 0.9  # Use 90% of available GPU memory
+  memory_isolation: "none"  # No memory isolation to prevent OOM issues
+  gpu_memory_fraction: 0.7  # Reduced from 0.9 to help with CUDA OOM issues
 
 # Global Configuration (applies to all pages only when no specific settings are provided)
 global:
@@ -68,7 +94,10 @@ prompts:
       Du siehst die obere Hälfte einer deutschen Gehaltsabrechnung.
 
       SUCHE NACH DIESEN INFORMATIONEN:
-      1. Namen des Angestellten, meist nach "Herrn/Frau" oder unter "Name"
+      1. Namen des Angestellten
+         - POSITION: Typischerweise auf der LINKEN Seite, meist nach "Herrn/Frau" oder unter "Name"
+         - HINWEIS: Der Name befindet sich oft im oberen linken Drittel des Dokuments
+         - ERKENNBAR: Vollständiger Name (Vorname und Nachname)
       2. Bruttogehalt ("Gesamt-Brutto") falls in diesem Bereich sichtbar
       3. Nettogehalt ("Auszahlungsbetrag") falls in diesem Bereich sichtbar
 
@@ -93,18 +122,21 @@ prompts:
       SUCHE NACH DIESEN INFORMATIONEN:
       1. Namen des Angestellten falls in diesem Bereich sichtbar
       2. Bruttogehalt ("Gesamt-Brutto")
+         - POSITION: Suche AUSSCHLIESSLICH auf der RECHTEN Seite des Dokuments
          - WICHTIG: Es gibt möglicherweise zwei "Gesamt-Brutto" Werte!
-         - Der korrekte Wert steht meist unter dem Label "Gesamt-Brutto" auf der rechten Seite
-         - Ignoriere Werte unter "Verdienstbescheinigung" auf der linken Seite
+         - Der korrekte Wert steht IMMER unter dem Label "Gesamt-Brutto" auf der RECHTEN Seite
+         - IGNORIERE KOMPLETT alle Werte unter "Verdienstbescheinigung" auf der linken Seite
          - Der Wert sollte im Bereich von 1.000 € bis 10.000 € liegen
       3. Nettogehalt ("Auszahlungsbetrag")
-         - Meist ganz unten im Dokument
-         - Der Wert steht direkt neben dem Label, oft rechts ausgerichtet
-         - Typischerweise die letzte Zahl im Dokument
-         - Der Wert sollte kleiner als das Bruttogehalt sein
+         - POSITION: Meist ganz unten auf der RECHTEN Seite des Dokuments
+         - ERKENNBAR: Der Wert steht direkt neben dem Label "Auszahlungsbetrag", rechts ausgerichtet
+         - HINWEIS: Dies ist typischerweise die letzte Zahl im Dokument
+         - PRÜFUNG: Der Wert sollte kleiner als das Bruttogehalt sein
 
       WICHTIG:
       - Gib NUR die Werte zurück, die zu diesen spezifischen Labels gehören
+      - Die wichtigsten Zahlenwerte (Brutto und Netto) sind IMMER auf der rechten Seite des Dokuments
+      - Ignoriere alle ähnlichen Werte auf der linken Seite
       - Achte auf das korrekte Format: #.###,## (mit Punkt als Tausendertrennzeichen)
       - Gib "unknown" für den Namen zurück, wenn du ihn nicht finden kannst
       - Gib "0" für Beträge zurück, wenn du sie nicht sicher identifizieren kannst
@@ -229,11 +261,11 @@ extraction:
 
 # PDF Processing Settings
 pdf:
-  dpi: 350  # Reduced DPI to save memory
+  dpi: 350  # Further reduced DPI to save memory
 
 # Image Processing Settings
 image:
-  resolution_steps: [600, 400]  # Fixed to explicitly use a list of integers
+  resolution_steps: [800, 650]  # Reduced resolution steps to use less memory
   enhance_contrast: true
   sharpen_factor: 2.0
   contrast_factor: 1.5
@@ -251,8 +283,14 @@ window:
 
 # Text Generation Settings
 text_generation:
-  max_new_tokens: 768
-  use_beam_search: false
-  num_beams: 1
-  temperature: 0.1
-  top_p: 0.95 
+  max_new_tokens: 768  # Limit maximum tokens generated
+  use_beam_search: false  # Use greedy decoding instead of beam search
+  temperature: 0.3  # Lower temperature for more focused responses
+  top_p: 0.9  # Nucleus sampling parameter
+
+# Window Settings
+window:
+  window_mode: vertical
+  overlap: 0.1  # Renamed from window_overlap
+  min_size: 100  # Renamed from window_min_size
+  selected_windows: [top, bottom] 

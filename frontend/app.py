@@ -68,7 +68,7 @@ def proxy_container_status():
         # First check if the backend is reachable at all
         try:
             app.logger.info("Checking backend health at %s", app.config['BACKEND_URL'])
-            health_response = requests.get(f"{app.config['BACKEND_URL']}/health", timeout=2)
+            health_response = requests.get(f"{app.config['BACKEND_URL']}/health", timeout=10)
             backend_available = health_response.status_code == 200
             app.logger.info("Backend health check result: %s (status %d)", 
                            "available" if backend_available else "unavailable", 
@@ -88,7 +88,7 @@ def proxy_container_status():
             
         # Backend is available, now check container status
         app.logger.info("Checking container status")
-        response = requests.get(f"{app.config['BACKEND_URL']}/container-status", timeout=5)
+        response = requests.get(f"{app.config['BACKEND_URL']}/container-status", timeout=15)
         if response.status_code == 200:
             status_data = response.json()
             # Add the backend availability flag
@@ -128,6 +128,25 @@ def proxy_restart_container_with_gpu():
         app.logger.error(f"Error restarting container with GPU: {str(e)}")
         return jsonify({"success": False, "message": str(e)}), 500
 
+def cleanup_gpu_memory():
+    """
+    Call the backend endpoint to clean up GPU memory
+    This helps prevent memory issues when processing multiple files
+    without restarting the container
+    """
+    try:
+        app.logger.info("Requesting GPU memory cleanup")
+        response = requests.get(f"{app.config['BACKEND_URL']}/api/cleanup-memory", timeout=30)
+        if response.status_code == 200:
+            app.logger.info("GPU memory cleanup successful")
+            return True
+        else:
+            app.logger.warning(f"GPU memory cleanup failed with status {response.status_code}")
+            return False
+    except Exception as e:
+        app.logger.error(f"Error requesting GPU memory cleanup: {str(e)}")
+        return False
+
 @app.route('/upload-payslip', methods=['POST'])
 def upload_payslip():
     if 'file' not in request.files:
@@ -147,27 +166,25 @@ def upload_payslip():
         try:
             with open(filepath, 'rb') as f:
                 files = {'file': (filename, f, 'application/pdf')}
+                
+                # Always use vertical window mode
+                data = {'window_mode': 'vertical'}
+                
                 response = requests.post(
-                    f"{app.config['BACKEND_URL']}/api/process-payslip", 
-                    files=files
+                    f"{app.config['BACKEND_URL']}/api/extract-payslip", 
+                    files=files,
+                    data=data
                 )
             
             # Clean up the temporary file
             os.remove(filepath)
             
+            # Always request GPU memory cleanup after processing
+            cleanup_gpu_memory()
+            
             if response.status_code == 200:
                 result = response.json()
-                # Format the response to match the expected structure
-                return jsonify({
-                    'employee': {
-                        'name': result.get('employee_name', 'Unknown')
-                    },
-                    'payment': {
-                        'gross': result.get('gross_amount', '0'),
-                        'net': result.get('net_amount', '0')
-                    },
-                    'processing_time': result.get('processing_time', None)
-                })
+                return jsonify(result)
             else:
                 error_message = 'Backend processing failed'
                 try:
@@ -186,203 +203,85 @@ def upload_payslip():
             if os.path.exists(filepath):
                 os.remove(filepath)
 
-@app.route('/upload-payslip-single', methods=['POST'])
-def upload_payslip_single():
-    if 'file' not in request.files:
-        return jsonify({'error': 'No file part'}), 400
-    
-    file = request.files['file']
-    if file.filename == '':
-        return jsonify({'error': 'No selected file'}), 400
-    
-    # Get page and quadrant specifications
-    employee_name_page = request.form.get('employee_name_page', None)
-    employee_name_quadrant = request.form.get('employee_name_quadrant', None)
-    gross_page = request.form.get('gross_page', None)
-    gross_quadrant = request.form.get('gross_quadrant', None)
-    net_page = request.form.get('net_page', None)
-    net_quadrant = request.form.get('net_quadrant', None)
-    
-    # Convert page numbers to integers if provided
-    if employee_name_page and employee_name_page.isdigit():
-        employee_name_page = int(employee_name_page)
-    else:
-        employee_name_page = None
-        
-    if gross_page and gross_page.isdigit():
-        gross_page = int(gross_page)
-    else:
-        gross_page = None
-        
-    if net_page and net_page.isdigit():
-        net_page = int(net_page)
-    else:
-        net_page = None
-    
-    if file:
-        # Save file temporarily
-        filename = secure_filename(file.filename)
-        filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-        file.save(filepath)
-        
-        # Send to backend for guided extraction
-        try:
-            with open(filepath, 'rb') as f:
-                files = {'file': (filename, f, 'application/pdf')}
-                
-                # Prepare form data with page/quadrant specifications
-                form_data = {}
-                
-                # Create page configs object
-                page_configs = {}
-                
-                if employee_name_page is not None:
-                    if employee_name_page not in page_configs:
-                        page_configs[employee_name_page] = {}
-                    page_configs[employee_name_page]['employee_name'] = {
-                        'quadrant': employee_name_quadrant or 'full'
-                    }
-                
-                if gross_page is not None:
-                    if gross_page not in page_configs:
-                        page_configs[gross_page] = {}
-                    page_configs[gross_page]['gross_amount'] = {
-                        'quadrant': gross_quadrant or 'full'
-                    }
-                
-                if net_page is not None:
-                    if net_page not in page_configs:
-                        page_configs[net_page] = {}
-                    page_configs[net_page]['net_amount'] = {
-                        'quadrant': net_quadrant or 'full'
-                    }
-                
-                # Add the page configs as JSON
-                if page_configs:
-                    import json
-                    form_data['page_configs'] = json.dumps(page_configs)
-                
-                app.logger.info(f"Sending file for processing with page configs: {form_data}")
-                
-                response = requests.post(
-                    f"{app.config['BACKEND_URL']}/api/extract-payslip-single", 
-                    files=files,
-                    data=form_data
-                )
-            
-            # Clean up the temporary file
-            os.remove(filepath)
-            
-            if response.status_code == 200:
-                result = response.json()
-                # Format the response to match the expected structure
-                return jsonify({
-                    'employee': {
-                        'name': result.get('employee_name', 'Unknown')
-                    },
-                    'payment': {
-                        'gross': result.get('gross_amount', '0'),
-                        'net': result.get('net_amount', '0')
-                    },
-                    'processing_time': result.get('processing_time', None)
-                })
-            else:
-                error_message = 'Backend processing failed'
-                try:
-                    error_data = response.json()
-                    if 'detail' in error_data:
-                        error_message = error_data['detail']
-                except:
-                    pass
-                return jsonify({'error': error_message}), response.status_code
-                
-        except Exception as e:
-            app.logger.error(f"Error in single file processing: {str(e)}")
-            return jsonify({'error': str(e)}), 500
-        finally:
-            # Make sure file is removed even if there's an error
-            if os.path.exists(filepath):
-                os.remove(filepath)
-
 @app.route('/upload-payslip-batch', methods=['POST'])
 def upload_payslip_batch():
-    # Check if there are files in the request
-    has_files = False
-    for key in request.files:
-        if request.files[key].filename:
-            has_files = True
-            break
+    files = []
     
-    if not has_files:
-        return jsonify({'error': 'No files uploaded'}), 400
+    # Extract all files from the form data
+    for key, file in request.files.items():
+        if file.filename != '':
+            # Save file temporarily
+            filename = secure_filename(file.filename)
+            filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+            file.save(filepath)
+            files.append((filename, filepath))
     
-    # Create a temporary directory for the batch
-    import uuid
-    batch_dir = os.path.join(app.config['UPLOAD_FOLDER'], f"batch_{uuid.uuid4().hex}")
-    os.makedirs(batch_dir, exist_ok=True)
+    if not files:
+        return jsonify({'error': 'No valid files found'}), 400
+    
+    batch_results = []
     
     try:
-        # Save all files temporarily
-        file_paths = []
-        file_count = 0
-        
-        # Get all files from the request
-        for key in request.files:
-            file = request.files[key]
-            if file and file.filename != '':
-                filename = secure_filename(file.filename)
-                filepath = os.path.join(batch_dir, filename)
-                file.save(filepath)
-                file_paths.append((filename, filepath))
-                file_count += 1
-        
-        if file_count == 0:
-            return jsonify({'error': 'No valid files uploaded'}), 400
-        
-        # Send to backend for batch processing
-        files_to_send = []
-        for filename, filepath in file_paths:
-            with open(filepath, 'rb') as f:
-                files_to_send.append(('files', (filename, f, 'application/pdf')))
-        
-        app.logger.info(f"Sending {len(files_to_send)} files to backend for batch processing")
-        
-        response = requests.post(
-            f"{app.config['BACKEND_URL']}/api/extract-payslip-batch", 
-            files=files_to_send
-        )
-        
-        # Clean up
-        import shutil
-        shutil.rmtree(batch_dir)
-        
-        if response.status_code == 200:
-            result = response.json()
-            # Format the results for the frontend
-            return jsonify({
-                'total_files': file_count,
-                'successful': result.get('successful', 0),
-                'failed': result.get('failed', 0),
-                'results': result.get('results', [])
-            })
-        else:
-            error_message = 'Backend batch processing failed'
+        # Process each file individually
+        for filename, filepath in files:
+            app.logger.info(f"Processing file: {filename}")
             try:
-                error_data = response.json()
-                if 'detail' in error_data:
-                    error_message = error_data['detail']
-            except:
-                pass
-            return jsonify({'error': error_message}), response.status_code
-            
-    except Exception as e:
-        app.logger.error(f"Error in batch processing: {str(e)}")
-        return jsonify({'error': str(e)}), 500
+                with open(filepath, 'rb') as f:
+                    files_dict = {'file': (filename, f, 'application/pdf')}
+                    
+                    # Always use vertical window mode
+                    data = {'window_mode': 'vertical'}
+                    
+                    response = requests.post(
+                        f"{app.config['BACKEND_URL']}/api/extract-payslip", 
+                        files=files_dict,
+                        data=data
+                    )
+                
+                # Check for successful processing
+                if response.status_code == 200:
+                    result = response.json()
+                    batch_results.append({
+                        'filename': filename,
+                        'success': True,
+                        'data': result
+                    })
+                else:
+                    error_message = 'Backend processing failed'
+                    try:
+                        error_data = response.json()
+                        if 'detail' in error_data:
+                            error_message = error_data['detail']
+                    except:
+                        pass
+                    batch_results.append({
+                        'filename': filename,
+                        'success': False,
+                        'error': error_message
+                    })
+                    
+                # Always request GPU memory cleanup after each file
+                cleanup_gpu_memory()
+                    
+            except Exception as e:
+                app.logger.error(f"Error processing file {filename}: {str(e)}")
+                batch_results.append({
+                    'filename': filename,
+                    'success': False,
+                    'error': str(e)
+                })
     finally:
-        # Make sure directory is removed even if there's an error
-        if os.path.exists(batch_dir):
-            import shutil
-            shutil.rmtree(batch_dir)
+        # Clean up all temporary files
+        for _, filepath in files:
+            if os.path.exists(filepath):
+                os.remove(filepath)
+    
+    # Return batch results
+    return jsonify({
+        'batch_results': batch_results,
+        'total_files': len(files),
+        'successful_files': sum(1 for result in batch_results if result.get('success', False))
+    })
 
 @app.route('/validate-payslip', methods=['POST'])
 def validate_payslip():
@@ -424,21 +323,38 @@ def upload_property():
         # Send to backend
         try:
             with open(filepath, 'rb') as f:
-                files = {'file': (filename, f)}
+                files = {'file': (filename, f, 'application/pdf')}
+                
+                # Always use whole window mode for property documents
+                data = {'window_mode': 'whole'}
+                
                 response = requests.post(
-                    f"{app.config['BACKEND_URL']}/api/process-property", 
-                    files=files
+                    f"{app.config['BACKEND_URL']}/api/extract-property", 
+                    files=files,
+                    data=data
                 )
             
             # Clean up the temporary file
             os.remove(filepath)
             
+            # Always request GPU memory cleanup after processing
+            cleanup_gpu_memory()
+            
             if response.status_code == 200:
-                return jsonify(response.json())
+                result = response.json()
+                return jsonify(result)
             else:
-                return jsonify({'error': response.json().get('detail', 'Backend processing failed')}), response.status_code
+                error_message = 'Backend processing failed'
+                try:
+                    error_data = response.json()
+                    if 'detail' in error_data:
+                        error_message = error_data['detail']
+                except:
+                    pass
+                return jsonify({'error': error_message}), response.status_code
                 
         except Exception as e:
+            app.logger.error(f"Error in property file processing: {str(e)}")
             return jsonify({'error': str(e)}), 500
         finally:
             # Make sure file is removed even if there's an error

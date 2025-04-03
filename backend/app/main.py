@@ -188,7 +188,7 @@ def restart_container_with_gpu():
 @app.post("/api/extract-payslip")
 async def extract_payslip(
     file: UploadFile = File(...),
-    window_mode: Optional[str] = Form("quadrant"),  # Default window mode
+    window_mode: Optional[str] = Form("vertical"),  # Default to vertical mode instead of quadrant
     memory_isolation: Optional[str] = Form(None),  # Allow setting memory isolation
     force_cpu: Optional[bool] = Form(False)  # Allow forcing CPU but default to false
 ):
@@ -244,17 +244,53 @@ async def extract_payslip(
         
         logger.info(f"Processing payslip with window mode '{window_mode}'")
         
+        start_time = time.time()
+        
         if file_ext in ['.pdf']:
             extracted_data = processor.process_pdf_file(
                 pdf_bytes=file_content,
                 file_name=file.filename
             )
-            return extracted_data
+        elif file_ext in ['.jpg', '.jpeg', '.png']:
+            extracted_data = processor.process_image_file(
+                image_bytes=file_content
+            )
         else:
-            raise HTTPException(status_code=400, detail=f"Unsupported file type: {file_ext}")
+            return JSONResponse(
+                status_code=400,
+                content={"error": f"Unsupported file format: {file_ext}. Please upload a PDF, JPG, or PNG file."}
+            )
+            
+        # Calculate processing time
+        processing_time = time.time() - start_time
+        
+        # Add processing metadata to response
+        result = {
+            "extracted_data": extracted_data,
+            "processing": {
+                "processing_time_seconds": processing_time,
+                "window_mode": window_mode,
+                "selected_windows": processor.config["processing"]["selected_windows"]
+            },
+            "file": {
+                "filename": file.filename,
+                "file_type": file_ext.lstrip('.')
+            }
+        }
+        
+        # Force explicit memory cleanup again to ensure GPU memory is released
+        try:
+            processor._explicit_memory_cleanup()
+        except Exception as e:
+            logger.warning(f"Additional memory cleanup failed: {str(e)}")
+        
+        return result
     except Exception as e:
         logger.error(f"Error processing payslip: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+        return JSONResponse(
+            status_code=500,
+            content={"error": f"Error processing file: {str(e)}"}
+        )
 
 @app.post("/api/extract-payslip-single")
 async def extract_payslip_single(
@@ -357,11 +393,13 @@ async def extract_payslip_single(
                 # Add to processor config
                 processor.config["pages"] = page_configs
                 
-                # Process the specific page
+                # Process the specific page with explicit override of global settings
                 partial_result = processor.process_pdf_with_pages(
                     pdf_bytes=file_content,
                     file_name=file.filename,
-                    pages=[employee_name_page]
+                    pages=[employee_name_page],
+                    selected_windows=extraction_selected_windows,
+                    override_global_settings="true" if extraction_selected_windows else None
                 )
                 
                 # Extract employee name and add to results
@@ -405,11 +443,13 @@ async def extract_payslip_single(
                 # Add to processor config
                 processor.config["pages"] = page_configs
                 
-                # Process the specific page
+                # Process the specific page with explicit override of global settings
                 partial_result = processor.process_pdf_with_pages(
                     pdf_bytes=file_content,
                     file_name=file.filename,
-                    pages=[gross_page]
+                    pages=[gross_page],
+                    selected_windows=extraction_selected_windows,
+                    override_global_settings="true" if extraction_selected_windows else None
                 )
                 
                 # Extract gross amount and add to results
@@ -453,11 +493,13 @@ async def extract_payslip_single(
                 # Add to processor config
                 processor.config["pages"] = page_configs
                 
-                # Process the specific page
+                # Process the specific page with explicit override of global settings
                 partial_result = processor.process_pdf_with_pages(
                     pdf_bytes=file_content,
                     file_name=file.filename,
-                    pages=[net_page]
+                    pages=[net_page],
+                    selected_windows=extraction_selected_windows,
+                    override_global_settings="true" if extraction_selected_windows else None
                 )
                 
                 # Extract net amount and add to results
@@ -489,8 +531,13 @@ async def extract_payslip_single(
             }
             
             # Select appropriate windows based on window_mode
+            selected_windows = None
             if window_mode in valid_windows:
-                processor.config["processing"]["selected_windows"] = valid_windows[window_mode]
+                selected_windows = valid_windows[window_mode]
+                processor.config["processing"]["selected_windows"] = selected_windows
+            
+            # Set override_global_settings to true to ensure our window mode is respected
+            processor.config["processing"]["override_global_settings"] = True
             
             # If using quadrant mode, ensure global settings don't override
             if window_mode == "quadrant":
@@ -507,6 +554,7 @@ async def extract_payslip_single(
                     
                     logger.info("Completely replaced global settings to ensure quadrant mode is used")
             
+            # Set override_global_settings parameter explicitly when calling process_pdf_file
             extracted_data = processor.process_pdf_file(
                 pdf_bytes=file_content,
                 file_name=file.filename
@@ -558,8 +606,13 @@ async def extract_payslip_batch(
         }
         
         # Select appropriate windows based on window_mode
+        selected_windows = None
         if window_mode in valid_windows:
-            processor.config["processing"]["selected_windows"] = valid_windows[window_mode]
+            selected_windows = valid_windows[window_mode]
+            processor.config["processing"]["selected_windows"] = selected_windows
+            
+        # Set override_global_settings to true to ensure our window mode is respected
+        processor.config["processing"]["override_global_settings"] = True
             
         # Set memory isolation if provided
         if memory_isolation is not None:
@@ -573,7 +626,7 @@ async def extract_payslip_batch(
             # Replace global settings to prevent conflicts with our explicit selection
             processor.config["global"] = {
                 "mode": window_mode,
-                "selected_windows": valid_windows[window_mode]
+                "selected_windows": selected_windows
             }
             # Keep any existing prompt instructions if present
             if "prompt_instructions" in processor.config.get("global", {}):
@@ -1049,4 +1102,33 @@ async def extract_payslip_advanced(
             
     except Exception as e:
         logger.error(f"Error in advanced payslip processing: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e)) 
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/cleanup-memory")
+async def cleanup_memory():
+    """
+    Force CUDA memory cleanup on the backend
+    This endpoint is available to force memory cleanup between operations
+    without needing to restart the container.
+    """
+    try:
+        # Create temporary processor instance just for cleanup
+        processor = QwenVLProcessor(document_type="payslip")
+        
+        # Call explicit cleanup method
+        processor._explicit_memory_cleanup()
+        
+        # Return success response
+        return {
+            "status": "success",
+            "message": "Memory cleanup completed successfully"
+        }
+    except Exception as e:
+        logger.error(f"Error during memory cleanup: {str(e)}")
+        return JSONResponse(
+            status_code=500,
+            content={
+                "status": "error",
+                "message": f"Error during memory cleanup: {str(e)}"
+            }
+        ) 
