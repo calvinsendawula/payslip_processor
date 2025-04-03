@@ -23,6 +23,9 @@ function showTab(tabName) {
     });
 }
 
+// Global variable to store the current extracted data
+let currentExtractedData = null;
+
 document.addEventListener('DOMContentLoaded', function() {
     // Docker container status check
     const dockerStatusIndicator = document.getElementById('docker-status-indicator');
@@ -906,6 +909,130 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // Setup payslip file upload
     setupPayslipUpload();
+
+    // Add event listener for the validate button
+    const validateBtn = document.getElementById('validate-btn');
+    if (validateBtn) {
+        validateBtn.addEventListener('click', validatePayslip);
+    }
+    
+    // Function to validate payslip data
+    function validatePayslip() {
+        const employeeIdInput = document.getElementById('employee-id');
+        if (!employeeIdInput || !employeeIdInput.value) {
+            alert('Bitte geben Sie eine Mitarbeiter-ID ein');
+            return;
+        }
+        
+        if (!currentExtractedData) {
+            alert('Keine Daten zum Validieren verfügbar');
+            return;
+        }
+        
+        // Show validating status
+        const statusElement = document.getElementById('payslip-status');
+        if (statusElement) {
+            statusElement.innerHTML = '<span class="material-icons">sync</span><span>Validiere Daten...</span>';
+            statusElement.className = 'summary-item loading';
+        }
+        
+        // Set all indicators to loading state
+        const indicators = ['employee-name-match', 'gross-amount-match', 'net-amount-match'];
+        indicators.forEach(id => {
+            const element = document.getElementById(id);
+            if (element) {
+                element.innerHTML = '<span class="material-icons">sync</span>';
+                element.className = 'detail-match loading';
+            }
+        });
+        
+        // Send validation request
+        fetch('/validate-payslip', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                employeeId: employeeIdInput.value,
+                extractedData: currentExtractedData
+            })
+        })
+        .then(response => {
+            if (!response.ok) {
+                return response.json().then(data => {
+                    throw new Error(data.error || 'Validierung fehlgeschlagen');
+                });
+            }
+            return response.json();
+        })
+        .then(data => {
+            // Update status
+            if (statusElement) {
+                if (data.is_valid) {
+                    statusElement.innerHTML = '<span class="material-icons">check_circle</span><span>Alle Daten korrekt</span>';
+                    statusElement.className = 'summary-item success';
+                } else {
+                    statusElement.innerHTML = '<span class="material-icons">warning</span><span>Abweichungen gefunden</span>';
+                    statusElement.className = 'summary-item warning';
+                }
+            }
+            
+            // Update field indicators and expected values
+            updateValidationDisplay(data);
+        })
+        .catch(error => {
+            console.error('Validation error:', error);
+            if (statusElement) {
+                statusElement.innerHTML = `<span class="material-icons">error</span><span>${error.message}</span>`;
+                statusElement.className = 'summary-item error';
+            }
+            
+            // Reset indicators to pending state
+            indicators.forEach(id => {
+                const element = document.getElementById(id);
+                if (element) {
+                    element.innerHTML = '<span class="material-icons">help</span>';
+                    element.className = 'detail-match';
+                }
+            });
+        });
+    }
+    
+    // Function to update validation display
+    function updateValidationDisplay(data) {
+        // Helper function to update field display
+        function updateField(fieldName, displayName) {
+            const matchElement = document.getElementById(`${displayName}-match`);
+            const expectedElement = document.getElementById(`${displayName}-expected`);
+            
+            if (!matchElement || !expectedElement) return;
+            
+            // Check if field is in matched fields
+            if (data.matched_fields.includes(fieldName)) {
+                matchElement.innerHTML = '<span class="material-icons">check_circle</span>';
+                matchElement.className = 'detail-match match-success';
+                expectedElement.textContent = '';
+            } else {
+                // Find mismatched field data
+                const mismatch = data.mismatched_fields.find(m => m.field === fieldName);
+                if (mismatch) {
+                    matchElement.innerHTML = '<span class="material-icons">warning</span>';
+                    matchElement.className = 'detail-match match-warning';
+                    expectedElement.textContent = `Erwartet: ${mismatch.expected}`;
+                    expectedElement.className = 'detail-expected visible';
+                } else {
+                    matchElement.innerHTML = '<span class="material-icons">help</span>';
+                    matchElement.className = 'detail-match';
+                    expectedElement.textContent = '';
+                }
+            }
+        }
+        
+        // Update each field
+        updateField('name', 'employee-name');
+        updateField('gross_amount', 'gross-amount');
+        updateField('net_amount', 'net-amount');
+    }
 });
 
 // Function to handle batch upload
