@@ -540,33 +540,54 @@ body {
 }
 
 .detail-expected {
-    color: #666;
     margin-left: 10px;
+    color: #666;
+    font-style: italic;
+    font-size: 0.9em;
     display: none;
-    word-break: break-word;
 }
 
-.detail-expected.show {
+.detail-expected.visible {
     display: inline;
 }
 
 .detail-match {
-    margin-right: 15px;
-    display: flex;
+    display: inline-flex;
     align-items: center;
     justify-content: center;
+    width: 24px;
+    height: 24px;
+    margin-right: 10px;
 }
 
 .detail-match .material-icons {
     font-size: 20px;
 }
 
+.match-pending .material-icons {
+    color: #757575;
+}
+
 .match-success .material-icons {
-    color: #baff79;
+    color: #4CAF50;
+}
+
+.match-warning .material-icons {
+    color: #FF9800;
 }
 
 .match-error .material-icons {
-    color: #f44336;
+    color: #F44336;
+}
+
+.loading .material-icons {
+    animation: spin 2s linear infinite;
+    color: #2196F3;
+}
+
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
 }
 
 /* Improve sidebar text wrapping */

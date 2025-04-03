@@ -1,18 +1,18 @@
 import os
-import re
+import json
 import time
+import yaml
 import logging
+import re
 from datetime import datetime
 from fastapi import FastAPI, File, UploadFile, HTTPException, Depends, Form, Request
 from sqlalchemy.orm import Session
 from fastapi.middleware.cors import CORSMiddleware
-from typing import Dict, List, Optional
-import json
+from typing import Dict, List, Optional, Any, Union
 import subprocess
 import requests
 from fastapi.responses import FileResponse, JSONResponse
 import io
-import yaml
 
 from . import models, schemas, database
 from .database import SessionLocal, engine
@@ -691,25 +691,109 @@ async def validate_payslip_by_id(data: dict, db: Session = Depends(get_db)):
     Validate extracted payslip data against a specific employee ID.
     """
     try:
-        # Extract employee ID from the data
-        employee_id = data.get("employee_id")
-        payslip_data = data.get("payslip_data")
+        # Extract data from the request
+        employee_id = data.get("employeeId")
+        extracted_data = data.get("extractedData")
         
         if not employee_id:
             raise HTTPException(status_code=400, detail="Employee ID is required")
             
-        if not payslip_data:
-            raise HTTPException(status_code=400, detail="Payslip data is required")
+        if not extracted_data:
+            raise HTTPException(status_code=400, detail="Extracted data is required")
         
-        # TODO: Implement validation logic against employee database
-        # For now, we'll just return a mock validation result
+        # Get employee from database
+        employee = db.query(models.Employee).filter(models.Employee.id == employee_id).first()
+        
+        if not employee:
+            logger.warning(f"Employee ID not found: {employee_id}")
+            return {
+                "is_valid": False,
+                "employee_id": employee_id,
+                "error": "Employee ID not found",
+                "validation_time": datetime.now().isoformat()
+            }
+        
+        # Helper function to convert German number format to float
+        def convert_german_to_float(value):
+            if not value or not isinstance(value, str):
+                return 0.0
+            
+            # Remove any non-numeric chars except comma and period
+            clean_value = re.sub(r'[^\d,.]', '', value)
+            
+            # Replace comma with period for decimal
+            clean_value = clean_value.replace(',', '.')
+            
+            # If multiple periods, keep only the last one
+            parts = clean_value.split('.')
+            if len(parts) > 2:
+                clean_value = ''.join(parts[:-1]) + '.' + parts[-1]
+            
+            try:
+                return float(clean_value)
+            except ValueError:
+                return 0.0
+        
+        # Extract values from the nested structure
+        employee_name = extracted_data.get("employee", {}).get("name", "")
+        gross_amount_str = extracted_data.get("payment", {}).get("gross", "0")
+        net_amount_str = extracted_data.get("payment", {}).get("net", "0")
+        
+        # Convert German number format to float
+        gross_amount = convert_german_to_float(gross_amount_str)
+        net_amount = convert_german_to_float(net_amount_str)
+        
+        # Initialize results
+        matched_fields = []
+        mismatched_fields = []
+        
+        # Check employee name
+        if employee_name.lower() == employee.name.lower():
+            matched_fields.append("name")
+        else:
+            mismatched_fields.append({
+                "field": "name", 
+                "extracted": employee_name, 
+                "expected": employee.name
+            })
+        
+        # Check gross amount with some tolerance (0.01 Euro)
+        if abs(gross_amount - employee.expected_gross) <= 0.01:
+            matched_fields.append("gross_amount")
+        else:
+            mismatched_fields.append({
+                "field": "gross_amount", 
+                "extracted": gross_amount_str, 
+                "expected": f"{employee.expected_gross:.2f}"
+            })
+        
+        # Check net amount with some tolerance (0.01 Euro)
+        if abs(net_amount - employee.expected_net) <= 0.01:
+            matched_fields.append("net_amount")
+        else:
+            mismatched_fields.append({
+                "field": "net_amount", 
+                "extracted": net_amount_str, 
+                "expected": f"{employee.expected_net:.2f}"
+            })
+        
+        # Determine overall validity
+        is_valid = len(mismatched_fields) == 0
+        
         validation_result = {
-            "is_valid": True,
+            "is_valid": is_valid,
             "employee_id": employee_id,
-            "matched_fields": ["name", "salary", "position"],
-            "mismatched_fields": [],
+            "employee_name": employee.name,
+            "expected_gross": f"{employee.expected_gross:.2f}",
+            "expected_net": f"{employee.expected_net:.2f}",
+            "matched_fields": matched_fields,
+            "mismatched_fields": mismatched_fields,
             "validation_time": datetime.now().isoformat()
         }
+        
+        logger.info(f"Validation result for employee {employee_id}: {is_valid}")
+        if mismatched_fields:
+            logger.info(f"Mismatched fields: {mismatched_fields}")
         
         return validation_result
     except Exception as e:
