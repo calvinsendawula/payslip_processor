@@ -70,7 +70,7 @@ docker run -d -p 27842:27842 --gpus all `
   --ipc=host `
   --ulimit memlock=-1 `
   --name qwen-processor `
-  calvin189/qwen-payslip-processor:latest
+  lavrilabi2/qwen-payslip-processor:latest
 ```
 
 **Linux/macOS/Bash:**
@@ -91,7 +91,7 @@ docker run -d -p 27842:27842 --gpus all \
   --ipc=host \
   --ulimit memlock=-1 \
   --name qwen-processor \
-  calvin189/qwen-payslip-processor:latest
+  lavrilabi2/qwen-payslip-processor:latest
 ```
 
 ### CPU Version (No GPU)
@@ -110,7 +110,7 @@ docker run -d -p 27842:27842 `
   --ipc=host `
   --ulimit memlock=-1 `
   --name qwen-processor `
-  calvin189/qwen-payslip-processor:latest
+  lavrilabi2/qwen-payslip-processor:latest
 ```
 
 **Linux/macOS/Bash:**
@@ -127,7 +127,7 @@ docker run -d -p 27842:27842 \
   --ipc=host \
   --ulimit memlock=-1 \
   --name qwen-processor \
-  calvin189/qwen-payslip-processor:latest
+  lavrilabi2/qwen-payslip-processor:latest
 ```
 
 ## Starting the Application
